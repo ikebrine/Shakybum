@@ -158,7 +158,14 @@ async function releaseCreatorPayout({ creator, payment }) {
     reason: `Shakybum payout — ${payment.kind}`,
     reference: transferRef,
   });
-  paymentsRepo.setStatus(payment.id, "released");
+  // Paystack accepting the transfer request means it's IN PROGRESS, not
+  // settled — actual completion is confirmed asynchronously via the
+  // transfer.success/transfer.failed webhook (see routes/payments.routes.js).
+  // The domain object (contact request / Bum session) still flips to
+  // "approved" right away for UX — reversing that after the fact would be
+  // worse than the alternative, so a failed transfer becomes a flagged
+  // reconciliation case (see handleTransferFailed) rather than an undo.
+  paymentsRepo.setPayoutReference(payment.id, transferRef);
 }
 
 export async function approveContactRequest({ contactRequestId, actingUser }) {
@@ -183,7 +190,9 @@ export async function declineContactRequest({ contactRequestId, actingUser }) {
 
   await refundTransaction({ reference: cr.paystackReference, reason: "Contact request declined" });
   const payment = paymentsRepo.findByReference(cr.paystackReference);
-  paymentsRepo.setStatus(payment.id, "refunded");
+  // Accepted by Paystack != settled — see releaseCreatorPayout for the same
+  // pattern on the payout side. Confirmed via refund.processed webhook.
+  paymentsRepo.setRefundReference(payment.id, cr.paystackReference);
   const updated = contactRequestsRepo.setStatus(contactRequestId, "declined");
 
   notificationsRepo.create({ userId: cr.payerId, type: "contact_declined", text: `Your contact request was declined and refunded.` });
@@ -212,7 +221,7 @@ export async function declineBumSession({ bumSessionId, actingUser }) {
 
   await refundTransaction({ reference: bs.paystackReference, reason: "Bum session declined" });
   const payment = paymentsRepo.findByReference(bs.paystackReference);
-  paymentsRepo.setStatus(payment.id, "refunded");
+  paymentsRepo.setRefundReference(payment.id, bs.paystackReference);
   const updated = bumSessionsRepo.setStatus(bumSessionId, "declined");
 
   notificationsRepo.create({ userId: bs.payerId, type: "bum_declined", text: `Your Bum session request was declined and refunded.` });
@@ -236,3 +245,64 @@ export async function endBumSession({ bumSessionId, actingUser }) {
 }
 
 export { EscrowError };
+
+// ── Async payout/refund confirmation (transfer.success/failed, refund.processed webhooks) ──
+//
+// NOTE on Paystack event shapes: these are implemented against Paystack's
+// documented webhook payloads as of this backend's writing, but weren't
+// verified against a live account (this dev environment can't reach
+// api.paystack.co — see README). Check your Paystack dashboard's webhook
+// event log against the field paths below before relying on this in
+// production; `data.reference` / `data.transaction.reference` are the
+// fields most likely to have shifted if Paystack's API has changed.
+
+export async function handleTransferSuccess(reference) {
+  const payment = paymentsRepo.findByPayoutReference(reference);
+  if (!payment) return { handled: false, reason: "no matching payout" };
+  if (payment.status !== "processing_payout") return { handled: false, reason: `already ${payment.status}` };
+
+  paymentsRepo.setStatus(payment.id, "released");
+  return { handled: true };
+}
+
+export async function handleTransferFailed(reference, failureReason) {
+  const payment = paymentsRepo.findByPayoutReference(reference);
+  if (!payment) return { handled: false, reason: "no matching payout" };
+  if (payment.status !== "processing_payout") return { handled: false, reason: `already ${payment.status}` };
+
+  paymentsRepo.setStatus(payment.id, "payout_failed");
+
+  // payment.userId is the PAYER — the payout that failed belongs to the
+  // CREATOR, so look that up via the underlying domain object instead.
+  let creatorId = null;
+  if (payment.kind === "contact") creatorId = contactRequestsRepo.findById(payment.refId)?.creatorId;
+  else if (payment.kind === "bum") creatorId = bumSessionsRepo.findById(payment.refId)?.creatorId;
+  else if (payment.kind === "bum_extend") {
+    const ext = bumExtensionsRepo.findById(payment.refId);
+    creatorId = ext ? bumSessionsRepo.findById(ext.bumSessionId)?.creatorId : null;
+  }
+
+  // The contact/Bum session was already marked "approved" and the payer
+  // already saw the result (contact info revealed / session confirmed) —
+  // reversing that would be worse than the alternative. This is now a
+  // financial reconciliation case: the creator is owed money the platform
+  // failed to deliver. Flagging both sides rather than pretending it didn't happen.
+  if (creatorId) {
+    notificationsRepo.create({
+      userId: creatorId,
+      type: "payout_issue",
+      text: `A payout to you (GHS ${payment.creatorCut.toFixed(2)}) failed (${failureReason || "unknown reason"}) — our team has been notified and will resolve this.`,
+    });
+  }
+  console.error(`[PAYOUT FAILED] payment ${payment.id} (${payment.kind}, ref ${payment.refId}) — creator ${creatorId} payout of GHS ${payment.creatorCut} did not complete. Needs manual resolution.`);
+  return { handled: true };
+}
+
+export async function handleRefundProcessed(transactionReference) {
+  const payment = paymentsRepo.findByReference(transactionReference);
+  if (!payment) return { handled: false, reason: "no matching payment" };
+  if (payment.status !== "processing_refund") return { handled: false, reason: `already ${payment.status}` };
+
+  paymentsRepo.setStatus(payment.id, "refunded");
+  return { handled: true };
+}

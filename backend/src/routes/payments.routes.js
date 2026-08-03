@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { verifyWebhookSignature } from "../lib/paystack.js";
-import { handleChargeSuccess } from "../services/escrow.service.js";
+import { handleChargeSuccess, handleTransferSuccess, handleTransferFailed, handleRefundProcessed } from "../services/escrow.service.js";
 
 const router = Router();
 
@@ -24,20 +24,34 @@ router.post("/paystack", async (req, res) => {
 
   // Always 200 quickly — Paystack retries on non-2xx, and slow/failing
   // responses here just cause duplicate retries, not correctness issues,
-  // since handleChargeSuccess is idempotent.
+  // since every handler below is idempotent (checks current status first).
   res.status(200).json({ received: true });
 
-  if (event.event === "charge.success") {
-    try {
-      await handleChargeSuccess(event.data.reference);
-    } catch (err) {
-      console.error("Error handling charge.success webhook:", err);
+  try {
+    switch (event.event) {
+      case "charge.success":
+        await handleChargeSuccess(event.data.reference);
+        break;
+      case "transfer.success":
+        await handleTransferSuccess(event.data.reference);
+        break;
+      case "transfer.failed":
+      case "transfer.reversed":
+        await handleTransferFailed(event.data.reference, event.data.reason || event.data.failure_reason);
+        break;
+      case "refund.processed":
+        // Assumes data.transaction.reference per Paystack's documented shape —
+        // see the NOTE in escrow.service.js above handleRefundProcessed.
+        await handleRefundProcessed(event.data.transaction?.reference || event.data.reference);
+        break;
+      default:
+        // Unhandled event types are expected — Paystack sends many we don't
+        // act on (e.g. subscription events). Not an error.
+        break;
     }
+  } catch (err) {
+    console.error(`Error handling ${event.event} webhook:`, err);
   }
-  // Other event types (transfer.success, transfer.failed, refund.processed)
-  // are worth handling too in production — logged here as a reminder, not
-  // wired up, since the happy-path transfer/refund calls in escrow.service.js
-  // already treat a non-2xx Paystack response as a thrown error synchronously.
 });
 
 export default router;

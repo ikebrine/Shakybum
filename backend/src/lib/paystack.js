@@ -1,8 +1,12 @@
 import crypto from "crypto";
 import fetch from "node-fetch";
 
-const PAYSTACK_BASE = process.env.PAYSTACK_BASE_URL || "https://api.paystack.co";
-const SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
+// Read lazily (not as module-level consts) so tests can point this at a
+// mock server via env var AFTER import — the mock's port isn't known until
+// after it starts listening, which necessarily happens after this module
+// is first imported (see src/__tests__/helpers/testEnv.js).
+const paystackBase = () => process.env.PAYSTACK_BASE_URL || "https://api.paystack.co";
+const secretKey = () => process.env.PAYSTACK_SECRET_KEY;
 
 // Paystack MoMo provider codes per network. Ghana only for now — see
 // momo_integration_guide.md for how this maps if you expand to Kenya/Nigeria.
@@ -13,10 +17,10 @@ export const MOMO_PROVIDERS = {
 };
 
 async function paystackRequest(path, { method = "GET", body } = {}) {
-  const res = await fetch(`${PAYSTACK_BASE}${path}`, {
+  const res = await fetch(`${paystackBase()}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${SECRET_KEY}`,
+      Authorization: `Bearer ${secretKey()}`,
       "Content-Type": "application/json",
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -110,6 +114,6 @@ export async function refundTransaction({ reference, amountGHS, reason }) {
  */
 export function verifyWebhookSignature(rawBody, signatureHeader) {
   if (!signatureHeader) return false;
-  const hash = crypto.createHmac("sha512", SECRET_KEY).update(rawBody).digest("hex");
+  const hash = crypto.createHmac("sha512", secretKey()).update(rawBody).digest("hex");
   return hash === signatureHeader;
 }

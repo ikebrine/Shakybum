@@ -89,6 +89,8 @@ function toPayment(row) {
     creatorCut: row.creator_cut,
     status: row.status,
     paystackReference: row.paystack_reference,
+    payoutReference: row.payout_reference,
+    refundReference: row.refund_reference,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -110,6 +112,17 @@ export const paymentsRepo = {
   setStatus(id, status) {
     db.prepare(`UPDATE payments SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, id);
     return this.findById(id);
+  },
+  setPayoutReference(id, payoutReference) {
+    db.prepare(`UPDATE payments SET payout_reference = ?, status = 'processing_payout', updated_at = datetime('now') WHERE id = ?`).run(payoutReference, id);
+    return this.findById(id);
+  },
+  setRefundReference(id, refundReference) {
+    db.prepare(`UPDATE payments SET refund_reference = ?, status = 'processing_refund', updated_at = datetime('now') WHERE id = ?`).run(refundReference, id);
+    return this.findById(id);
+  },
+  findByPayoutReference(ref) {
+    return toPayment(db.prepare(`SELECT * FROM payments WHERE payout_reference = ?`).get(ref));
   },
   ledgerFor(userId) {
     return db.prepare(`SELECT * FROM payments WHERE user_id = ? ORDER BY created_at DESC`).all(userId).map(toPayment);
