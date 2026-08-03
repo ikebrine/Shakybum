@@ -13,11 +13,25 @@ This is already fully built and verified working (`npm run build` produces
 
 **To ship it:**
 1. Deploy `dist/` to any static host — Vercel, Netlify, Cloudflare Pages,
-   or GitHub Pages all have free tiers and take ~2 minutes:
+   or GitHub Pages all have free tiers and take ~2 minutes.
+
+   **Vercel specifically** (since `vercel.json` is already in the repo):
+   ```bash
+   npm install -g vercel   # if you don't have the CLI
+   vercel login
+   vercel --prod
    ```
-   npm run build
-   npx vercel deploy dist --prod        # or: netlify deploy --prod --dir=dist
-   ```
+   Or via the dashboard: [vercel.com/new](https://vercel.com/new) → Import
+   this GitHub repo → it auto-detects the Vite framework and the settings
+   in `vercel.json` (build command, output directory, SPA rewrites, PWA
+   cache headers) — no manual config needed. Every push to `main`
+   auto-deploys.
+
+   One thing worth knowing about the `vercel.json` rewrite rule: it sends
+   every route to `index.html` (this is a single-page app) **except**
+   `/assets/*`, `/icons/*`, `sw.js`, `workbox-*.js`, and
+   `manifest.webmanifest` — those need to be served as their actual files,
+   not rewritten, or the service worker and PWA install prompt break.
 2. Give people the URL. On iOS Safari: **Share → Add to Home Screen**. On
    Android Chrome: a native "Install app" banner appears automatically.
 3. That's it — no app store review, no code signing, no waiting. Updates
