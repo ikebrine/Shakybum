@@ -1,0 +1,238 @@
+import { newId } from "../lib/id.js";
+import { initiateMomoCharge, createTransferRecipient, initiateTransfer, refundTransaction } from "../lib/paystack.js";
+import { priceForContact, priceForBum, creatorCut, platformFee, BUM_EXTEND_MIN } from "../lib/pricing.js";
+import { contactRequestsRepo } from "../repositories/contactRequests.js";
+import { bumSessionsRepo } from "../repositories/bumSessions.js";
+import { bumExtensionsRepo, paymentsRepo, notificationsRepo } from "../repositories/misc.js";
+import { usersRepo } from "../repositories/users.js";
+
+class EscrowError extends Error {
+  constructor(message, status = 400) {
+    super(message);
+    this.status = status;
+  }
+}
+
+// ── Initiate payments (payer side) ──
+
+export async function initiateContactPayment({ payer, creator, phone, provider }) {
+  if (payer.id === creator.id) throw new EscrowError("Can't request your own contact");
+  const amount = priceForContact(creator.badge);
+  const reference = newId("pstk_contact");
+
+  const contactRequest = contactRequestsRepo.create({ payerId: payer.id, creatorId: creator.id, amount, paystackReference: reference });
+  const payment = paymentsRepo.create({
+    userId: payer.id, kind: "contact", refId: contactRequest.id,
+    amount, platformCut: platformFee(amount), creatorCut: creatorCut(amount), paystackReference: reference,
+  });
+
+  try {
+    const charge = await initiateMomoCharge({
+      email: payer.email, amountGHS: amount, phone, provider, reference,
+      metadata: { kind: "contact", contactRequestId: contactRequest.id },
+    });
+    return { contactRequest, charge };
+  } catch (err) {
+    // Charge never actually started — don't leave the request stuck in
+    // "pending" forever, since nothing will ever webhook back to resolve it.
+    contactRequestsRepo.setStatus(contactRequest.id, "expired");
+    paymentsRepo.setStatus(payment.id, "failed");
+    throw err;
+  }
+}
+
+export async function initiateBumPayment({ payer, creator, mins, phone, provider }) {
+  if (payer.id === creator.id) throw new EscrowError("Can't book your own session");
+  const amount = priceForBum(creator.badge, mins);
+  const reference = newId("pstk_bum");
+
+  const bumSession = bumSessionsRepo.create({ payerId: payer.id, creatorId: creator.id, mins, amount, paystackReference: reference });
+  const payment = paymentsRepo.create({
+    userId: payer.id, kind: "bum", refId: bumSession.id,
+    amount, platformCut: platformFee(amount), creatorCut: creatorCut(amount), paystackReference: reference,
+  });
+
+  try {
+    const charge = await initiateMomoCharge({
+      email: payer.email, amountGHS: amount, phone, provider, reference,
+      metadata: { kind: "bum", bumSessionId: bumSession.id },
+    });
+    return { bumSession, charge };
+  } catch (err) {
+    bumSessionsRepo.setStatus(bumSession.id, "expired");
+    paymentsRepo.setStatus(payment.id, "failed");
+    throw err;
+  }
+}
+
+export async function initiateBumExtension({ bumSession, payer, phone, provider }) {
+  if (!["approved", "active"].includes(bumSession.status)) {
+    throw new EscrowError("Session must be confirmed and running to extend");
+  }
+  const creator = usersRepo.findById(bumSession.creatorId);
+  const amount = priceForBum(creator.badge, BUM_EXTEND_MIN);
+  const reference = newId("pstk_ext");
+
+  const extension = bumExtensionsRepo.create({ bumSessionId: bumSession.id, mins: BUM_EXTEND_MIN, amount, paystackReference: reference });
+  const payment = paymentsRepo.create({
+    userId: payer.id, kind: "bum_extend", refId: extension.id,
+    amount, platformCut: platformFee(amount), creatorCut: creatorCut(amount), paystackReference: reference,
+  });
+
+  try {
+    const charge = await initiateMomoCharge({
+      email: payer.email, amountGHS: amount, phone, provider, reference,
+      metadata: { kind: "bum_extend", bumExtensionId: extension.id, bumSessionId: bumSession.id },
+    });
+    return { extension, charge };
+  } catch (err) {
+    bumExtensionsRepo.setStatus(extension.id, "failed");
+    paymentsRepo.setStatus(payment.id, "failed");
+    throw err;
+  }
+}
+
+// ── Webhook confirmation (Paystack calls this indirectly via routes/payments.js) ──
+
+/**
+ * Called once a `charge.success` webhook is verified. Idempotent — if the
+ * payment is already marked paid, this is a no-op (Paystack can and does
+ * retry webhook delivery).
+ */
+export async function handleChargeSuccess(reference) {
+  const payment = paymentsRepo.findByReference(reference);
+  if (!payment) return { handled: false, reason: "no matching payment" };
+  if (payment.status !== "initiated") return { handled: false, reason: `already ${payment.status}` };
+
+  paymentsRepo.setStatus(payment.id, "paid");
+
+  if (payment.kind === "contact") {
+    const cr = contactRequestsRepo.setStatus(payment.refId, "paid_hold");
+    notificationsRepo.create({
+      userId: cr.creatorId, type: "contact_request",
+      text: `New paid contact request — GHS ${payment.amount.toFixed(2)} held in escrow. Approve or decline in Contact Requests.`,
+    });
+    return { handled: true, kind: "contact", contactRequest: cr };
+  }
+
+  if (payment.kind === "bum") {
+    const bs = bumSessionsRepo.setStatus(payment.refId, "paid_hold");
+    notificationsRepo.create({
+      userId: bs.creatorId, type: "bum_request",
+      text: `New Bum session request (${bs.mins} min) — GHS ${payment.amount.toFixed(2)} held in escrow.`,
+    });
+    return { handled: true, kind: "bum", bumSession: bs };
+  }
+
+  if (payment.kind === "bum_extend") {
+    // Extensions are instant (the creator already agreed by confirming the base
+    // session) — no approval hold, apply immediately and release the payout now.
+    const ext = bumExtensionsRepo.setStatus(payment.refId, "paid");
+    const session = bumSessionsRepo.extend(ext.bumSessionId, ext.mins * 60);
+    await releaseCreatorPayout({ creator: usersRepo.findById(session.creatorId), payment });
+    notificationsRepo.create({
+      userId: session.payerId, type: "bum_extended",
+      text: `+${ext.mins} min added to your session.`,
+    });
+    return { handled: true, kind: "bum_extend", bumSession: session };
+  }
+
+  return { handled: false, reason: "unknown payment kind" };
+}
+
+// ── Approve / decline (creator side) ──
+
+async function releaseCreatorPayout({ creator, payment }) {
+  if (!creator.paystackRecipientCode) {
+    // Don't silently swallow this — a creator without a registered payout
+    // destination should block on approval, not lose the payout.
+    throw new EscrowError(
+      "Creator has no payout method registered — register a payout MoMo number (POST /api/users/me/payout-destination) before approving requests.",
+      409
+    );
+  }
+  const transferRef = newId("pstk_payout");
+  await initiateTransfer({
+    recipientCode: creator.paystackRecipientCode,
+    amountGHS: payment.creatorCut,
+    reason: `Shakybum payout — ${payment.kind}`,
+    reference: transferRef,
+  });
+  paymentsRepo.setStatus(payment.id, "released");
+}
+
+export async function approveContactRequest({ contactRequestId, actingUser }) {
+  const cr = contactRequestsRepo.findById(contactRequestId);
+  if (!cr) throw new EscrowError("Contact request not found", 404);
+  if (cr.creatorId !== actingUser.id) throw new EscrowError("Not your request to approve", 403);
+  if (cr.status !== "paid_hold") throw new EscrowError(`Cannot approve a request in status '${cr.status}'`);
+
+  const payment = paymentsRepo.findByReference(cr.paystackReference);
+  await releaseCreatorPayout({ creator: actingUser, payment });
+  const updated = contactRequestsRepo.setStatus(contactRequestId, "approved");
+
+  notificationsRepo.create({ userId: cr.payerId, type: "contact_approved", text: `${actingUser.name} approved your contact request!` });
+  return updated;
+}
+
+export async function declineContactRequest({ contactRequestId, actingUser }) {
+  const cr = contactRequestsRepo.findById(contactRequestId);
+  if (!cr) throw new EscrowError("Contact request not found", 404);
+  if (cr.creatorId !== actingUser.id) throw new EscrowError("Not your request to decline", 403);
+  if (cr.status !== "paid_hold") throw new EscrowError(`Cannot decline a request in status '${cr.status}'`);
+
+  await refundTransaction({ reference: cr.paystackReference, reason: "Contact request declined" });
+  const payment = paymentsRepo.findByReference(cr.paystackReference);
+  paymentsRepo.setStatus(payment.id, "refunded");
+  const updated = contactRequestsRepo.setStatus(contactRequestId, "declined");
+
+  notificationsRepo.create({ userId: cr.payerId, type: "contact_declined", text: `Your contact request was declined and refunded.` });
+  return updated;
+}
+
+export async function approveBumSession({ bumSessionId, actingUser }) {
+  const bs = bumSessionsRepo.findById(bumSessionId);
+  if (!bs) throw new EscrowError("Bum session not found", 404);
+  if (bs.creatorId !== actingUser.id) throw new EscrowError("Not your session to approve", 403);
+  if (bs.status !== "paid_hold") throw new EscrowError(`Cannot approve a session in status '${bs.status}'`);
+
+  const payment = paymentsRepo.findByReference(bs.paystackReference);
+  await releaseCreatorPayout({ creator: actingUser, payment });
+  const updated = bumSessionsRepo.setStatus(bumSessionId, "approved");
+
+  notificationsRepo.create({ userId: bs.payerId, type: "bum_approved", text: `${actingUser.name} confirmed your ${bs.mins}-min Bum session!` });
+  return updated;
+}
+
+export async function declineBumSession({ bumSessionId, actingUser }) {
+  const bs = bumSessionsRepo.findById(bumSessionId);
+  if (!bs) throw new EscrowError("Bum session not found", 404);
+  if (bs.creatorId !== actingUser.id) throw new EscrowError("Not your session to decline", 403);
+  if (bs.status !== "paid_hold") throw new EscrowError(`Cannot decline a session in status '${bs.status}'`);
+
+  await refundTransaction({ reference: bs.paystackReference, reason: "Bum session declined" });
+  const payment = paymentsRepo.findByReference(bs.paystackReference);
+  paymentsRepo.setStatus(payment.id, "refunded");
+  const updated = bumSessionsRepo.setStatus(bumSessionId, "declined");
+
+  notificationsRepo.create({ userId: bs.payerId, type: "bum_declined", text: `Your Bum session request was declined and refunded.` });
+  return updated;
+}
+
+export async function startBumSession({ bumSessionId, actingUser }) {
+  const bs = bumSessionsRepo.findById(bumSessionId);
+  if (!bs) throw new EscrowError("Bum session not found", 404);
+  if (![bs.payerId, bs.creatorId].includes(actingUser.id)) throw new EscrowError("Not a participant in this session", 403);
+  if (bs.status !== "approved") throw new EscrowError(`Cannot start a session in status '${bs.status}'`);
+  return bumSessionsRepo.start(bumSessionId);
+}
+
+export async function endBumSession({ bumSessionId, actingUser }) {
+  const bs = bumSessionsRepo.findById(bumSessionId);
+  if (!bs) throw new EscrowError("Bum session not found", 404);
+  if (![bs.payerId, bs.creatorId].includes(actingUser.id)) throw new EscrowError("Not a participant in this session", 403);
+  if (bs.status !== "active") throw new EscrowError(`Cannot end a session in status '${bs.status}'`);
+  return bumSessionsRepo.end(bumSessionId);
+}
+
+export { EscrowError };
