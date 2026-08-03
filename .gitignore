@@ -1,0 +1,19 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Android build outputs (keep the project scaffold, not build artifacts)
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/captures/
+android/.idea/
+*.iml
+
+# iOS (if added later via `npx cap add ios`)
+ios/App/Pods/
+ios/App/build/
+
+.DS_Store

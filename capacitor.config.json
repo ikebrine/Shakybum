@@ -1,0 +1,12 @@
+{
+  "appId": "com.shakybum.app",
+  "appName": "Shakybum",
+  "webDir": "dist",
+  "backgroundColor": "#0E0718",
+  "android": {
+    "backgroundColor": "#0E0718"
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
