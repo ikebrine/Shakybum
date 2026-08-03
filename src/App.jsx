@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { api, getToken, setToken, clearToken, mapUser, badgeToFrontend, pollUntil, ApiError } from "./lib/api.js";
 
 const GS = () => (
   <>
@@ -55,6 +56,17 @@ const LIVE_OK=["Gold Queen","Platinum","Diamond"];
 // in production; this map is UI-only.
 const CONTACT_PRICE={"Newcomer":5,"Rising Star":8,"Silver Queen":12,"Gold Queen":15,"Platinum":25,"Diamond":40};
 const priceFor=user=>CONTACT_PRICE[user?.badge]||10;
+// Formats a backend "YYYY-MM-DD HH:MM:SS" (SQLite) or ISO timestamp as
+// relative time ("2m", "3h", "5d") for notification/activity displays.
+function timeAgo(ts){
+  if(!ts)return"";
+  const then=new Date(ts.includes("T")?ts:ts.replace(" ","T")+"Z").getTime();
+  const diffSec=Math.max(0,Math.floor((Date.now()-then)/1000));
+  if(diffSec<60)return`${diffSec}s`;
+  if(diffSec<3600)return`${Math.floor(diffSec/60)}m`;
+  if(diffSec<86400)return`${Math.floor(diffSec/3600)}h`;
+  return`${Math.floor(diffSec/86400)}d`;
+}
 // Live Bum sessions are a premium, private product — priced higher than a contact reveal,
 // and only offered by Silver Queen+ creators who've opted in (bumEnabled).
 // Live Bum sessions are billed by duration, not flat rate — MoMo can't meter continuously
@@ -459,7 +471,7 @@ function SavedMovesScreen({onClose,showToast}) {
 }
 
 // ── USER PROFILE SHEET ──
-function UserSheet({user,onClose,following,setFollowing,contactRequests,setContactRequests,approvedContacts,setApprovedContacts,bumRequests,setBumRequests,showToast,openProfile,requestContact,requestBum,openChat}) {
+function UserSheet({user,onClose,following,setFollowing,contactRequests,approvedContacts,bumRequests,showToast,openProfile,requestContact,requestBum,openChat}) {
   if(!user)return null;
   const isF=following.includes(user.id);
   const cSent=(contactRequests.sent||[]).includes(user.id);
@@ -467,8 +479,11 @@ function UserSheet({user,onClose,following,setFollowing,contactRequests,setConta
   const bSent=(bumRequests.sent||[]).some(r=>r.id===user.id);
   const canBum=BUM_OK.includes(user.badge)&&user.bumEnabled;
 
-  const unsendContact=()=>{setContactRequests(p=>({...p,sent:(p.sent||[]).filter(x=>x!==user.id)}));showToast("Contact request unsent 📭");};
-  const unsendBum=()=>{setBumRequests(p=>({...p,sent:(p.sent||[]).filter(r=>r.id!==user.id)}));showToast("Live Bum request unsent 🍑");};
+  // Held payments can't be cancelled from the payer's side — only the
+  // creator can approve/decline (see backend routes). Honest messaging
+  // instead of a fake "unsend" that doesn't touch the real held payment.
+  const unsendContact=()=>showToast("Payment is held until they respond — it can't be cancelled from your side.");
+  const unsendBum=()=>showToast("Payment is held until they respond — it can't be cancelled from your side.");
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(5,0,14,0.88)",backdropFilter:"blur(14px)",zIndex:500,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
@@ -530,8 +545,15 @@ function UserSheet({user,onClose,following,setFollowing,contactRequests,setConta
 
 // ── NOTIFICATIONS ──
 function NotifScreen({notifs,setNotifs,onClose}) {
-  const markAll=()=>setNotifs(p=>p.map(n=>({...n,read:true})));
-  const ic={like:"❤️",challenge:"🏆",contact:"📬",bum:"🍑",follow:"👥",comment:"💬",live:"🔴",short:"⚡"};
+  const markAll=()=>{setNotifs(p=>p.map(n=>({...n,read:true})));notifs.filter(n=>!n.read).forEach(n=>api.notifications.markRead(n.id).catch(()=>{}));};
+  const markOne=n=>{setNotifs(p=>p.map(x=>x.id===n.id?{...x,read:true}:x));if(!n.read)api.notifications.markRead(n.id).catch(()=>{});};
+  // Matches backend notification `type` values (routes/*.js, services/*.js) —
+  // not the old mock's generic categories.
+  const ic={
+    contact_request:"📬",contact_approved:"✅",contact_declined:"📭",
+    bum_request:"🍑",bum_approved:"🍑",bum_declined:"📭",bum_extended:"⏱️",
+    message:"💬",new_follower:"👥",badge_up:"🎉",badge_down:"📉",payout_issue:"⚠️",
+  };
   return (
     <div style={{position:"fixed",inset:0,background:`radial-gradient(ellipse at top,#2e0a40,${C.bg})`,zIndex:700,display:"flex",flexDirection:"column",maxWidth:390,margin:"0 auto"}}>
       <div style={{padding:"52px 20px 14px",display:"flex",alignItems:"center",gap:12}}>
@@ -540,12 +562,12 @@ function NotifScreen({notifs,setNotifs,onClose}) {
         <button onClick={markAll} style={{background:"none",border:"none",color:C.pink,fontSize:12,fontWeight:700,cursor:"pointer"}}>Mark all read</button>
       </div>
       <div style={{flex:1,overflowY:"auto",padding:"0 20px",display:"flex",flexDirection:"column",gap:4}}>
+        {notifs.length===0&&<div style={{textAlign:"center",padding:"60px 20px",color:C.sub}}><div style={{fontSize:44,marginBottom:10}}>🔔</div>Nothing yet</div>}
         {notifs.map(n=>(
-          <div key={n.id} onClick={()=>setNotifs(p=>p.map(x=>x.id===n.id?{...x,read:true}:x))} style={{background:C.bgCard,borderRadius:14,padding:"12px 14px",display:"flex",gap:12,alignItems:"flex-start",border:`1px solid ${n.read?C.border:C.borderH}`,cursor:"pointer",marginBottom:2}}>
-            <div style={{width:38,height:38,borderRadius:11,background:`${n.user.color}18`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{ic[n.type]||"🔔"}</div>
+          <div key={n.id} onClick={()=>markOne(n)} style={{background:C.bgCard,borderRadius:14,padding:"12px 14px",display:"flex",gap:12,alignItems:"flex-start",border:`1px solid ${n.read?C.border:C.borderH}`,cursor:"pointer",marginBottom:2}}>
+            <div style={{width:38,height:38,borderRadius:11,background:C.pinkL,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{ic[n.type]||"🔔"}</div>
             <div style={{flex:1}}>
-              <span style={{fontSize:13,fontWeight:700,color:C.text}}>{n.user.name} </span>
-              <span style={{fontSize:13,color:C.sub}}>{n.msg}</span>
+              <span style={{fontSize:13,color:C.text}}>{n.msg}</span>
               <div style={{fontSize:11,color:C.sub,marginTop:3}}>{n.time} ago</div>
             </div>
             {!n.read&&<div style={{width:8,height:8,borderRadius:"50%",background:C.pink,flexShrink:0,marginTop:4}}/>}
@@ -995,17 +1017,23 @@ function ExploreTab({liked,setLiked,following,setFollowing,showToast,setProfileU
 }
 
 // ── COMMUNITY TAB ──
-function CommunityTab({users,following,setFollowing,contactRequests,setContactRequests,approvedContacts,setApprovedContacts,bumRequests,setBumRequests,approvedBum,setApprovedBum,showToast,setProfileUser,openProfile,requestContact,requestBum,startBumSession}) {
+function CommunityTab({users,following,setFollowing,contactRequests,approvedContacts,bumRequests,approvedBum,showToast,setProfileUser,openProfile,requestContact,requestBum,startBumSession,approveContact,declineContact,approveBumReq,declineBumReq}) {
   const [view,setView]=useState("discover");
   const [durPickerFor,setDurPickerFor]=useState(null); // uid whose 15/30-min picker is expanded in the Discover card
-  const incoming=contactRequests.received||[1,3];
+  const incoming=contactRequests.received||[];
   const incomingBum=bumRequests.received||[];
-  const approve=uid=>{setApprovedContacts(p=>[...p,uid]);setContactRequests(p=>({...p,received:(p.received||[]).filter(x=>x!==uid)}));showToast("Contact approved! 🎉");};
-  const deny=uid=>{setContactRequests(p=>({...p,received:(p.received||[]).filter(x=>x!==uid)}));showToast("Request declined.");};
-  const unsendContact=uid=>{setContactRequests(p=>({...p,sent:(p.sent||[]).filter(x=>x!==uid)}));showToast("Contact request unsent 📭");};
-  const unsendBum=uid=>{setBumRequests(p=>({...p,sent:(p.sent||[]).filter(r=>r.id!==uid)}));showToast("Live Bum request unsent 🍑");};
-  const approveBum=req=>{setApprovedBum(p=>[...p,req]);setBumRequests(p=>({...p,received:(p.received||[]).filter(r=>r.id!==req.id)}));showToast("Live Bum session confirmed — payout released! 🍑💸");};
-  const denyBum=uid=>{setBumRequests(p=>({...p,received:(p.received||[]).filter(r=>r.id!==uid)}));showToast("Session declined — payer refunded.");};
+  const approve=uid=>approveContact(uid);
+  const deny=uid=>declineContact(uid);
+  // Neither contact-requests nor Bum-session bookings can be cancelled by the
+  // payer once submitted — the backend only exposes approve/decline to the
+  // CREATOR (see backend/src/routes/contact.routes.js, bum.routes.js). A
+  // held payment stays held until the other side decides; that's a
+  // deliberate design, not a missing feature, so this is honest messaging
+  // rather than a fake "unsend" that doesn't touch the real held payment.
+  const unsendContact=()=>showToast("Payment is held until they respond — it can't be cancelled from your side.");
+  const unsendBum=()=>showToast("Payment is held until they respond — it can't be cancelled from your side.");
+  const approveBum=req=>approveBumReq(req._backendId);
+  const denyBum=req=>declineBumReq(req._backendId);
 
   return (
     <div>
@@ -1108,7 +1136,7 @@ function CommunityTab({users,following,setFollowing,contactRequests,setContactRe
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:800,color:C.green,paddingTop:6,marginTop:3,borderTop:`1px solid ${C.border}`}}><span>You receive</span><span>GHS {creatorCut(amt).toFixed(2)}</span></div>
                   </div>
                   <div style={{display:"flex",gap:10}}>
-                    <button onClick={()=>denyBum(req.id)} style={{flex:1,background:C.bgAlt,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px",color:C.sub,fontWeight:700,fontSize:13,cursor:"pointer"}}>✕ Decline</button>
+                    <button onClick={()=>denyBum(req)} style={{flex:1,background:C.bgAlt,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px",color:C.sub,fontWeight:700,fontSize:13,cursor:"pointer"}}>✕ Decline</button>
                     <button onClick={()=>approveBum(req)} style={{flex:2,background:"linear-gradient(135deg,#FFD700,#FF9A76)",border:"none",borderRadius:12,padding:"10px",color:"#0E0718",fontWeight:800,fontSize:13,cursor:"pointer"}}>✓ Confirm Session</button>
                   </div>
                 </Card>
@@ -1444,11 +1472,10 @@ function MyChallengesScreen({onClose,showToast}) {
 }
 
 // ── CONTACT REQUESTS SCREEN ──
-function ContactRequestsScreen({onClose,showToast,contactRequests,setContactRequests,approvedContacts,setApprovedContacts,users,openChat}) {
-  const incoming=contactRequests.received||[1,3];
-  const approve=uid=>{setApprovedContacts(p=>[...p,uid]);setContactRequests(p=>({...p,received:(p.received||[]).filter(x=>x!==uid)}));showToast("Contact approved! 🎉");};
-  const deny=uid=>{setContactRequests(p=>({...p,received:(p.received||[]).filter(x=>x!==uid)}));showToast("Request declined.");};
-  const unsend=uid=>{setContactRequests(p=>({...p,sent:(p.sent||[]).filter(x=>x!==uid)}));showToast("Contact request unsent 📭");};
+function ContactRequestsScreen({onClose,showToast,contactRequests,approvedContacts,users,openChat,approveContact,declineContact}) {
+  const incoming=contactRequests.received||[];
+  const approve=async uid=>{await approveContact(uid);};
+  const deny=async uid=>{await declineContact(uid);};
   return (
     <div style={{position:"fixed",inset:0,background:`radial-gradient(ellipse at top,#2e0a40,${C.bg})`,zIndex:700,display:"flex",flexDirection:"column",maxWidth:390,margin:"0 auto"}}>
       <div style={{padding:"52px 20px 16px",display:"flex",alignItems:"center",gap:12}}>
@@ -1474,8 +1501,7 @@ function ContactRequestsScreen({onClose,showToast,contactRequests,setContactRequ
           {(contactRequests.sent||[]).map(uid=>{const u=users.find(x=>x.id===uid);if(!u)return null;return(
             <div key={uid} style={{background:C.bgCard,borderRadius:14,padding:"14px",border:`1px solid ${C.border}`,marginBottom:8}}>
               <div style={{display:"flex",alignItems:"center",gap:12}}>
-                <VideoAvatar user={u} size={40} showVideo/><div style={{flex:1}}><div style={{fontWeight:600,color:C.text}}>{u.name}</div><div style={{fontSize:12,color:C.peach}}>⏳ Awaiting approval</div></div>
-                <button onClick={()=>unsend(uid)} style={{background:"transparent",border:`1px solid ${C.peach}`,borderRadius:10,padding:"7px 12px",color:C.peach,fontWeight:700,fontSize:11,cursor:"pointer"}}>↩ Unsend</button>
+                <VideoAvatar user={u} size={40} showVideo/><div style={{flex:1}}><div style={{fontWeight:600,color:C.text}}>{u.name}</div><div style={{fontSize:12,color:C.peach}}>⏳ Held in escrow — awaiting their decision</div></div>
               </div>
             </div>
           );})}
@@ -1632,21 +1658,22 @@ function MomoNetworkPill({net,active,onClick}){
   );
 }
 /**
- * MomoPaymentModal — mock Mobile Money checkout for unlocking a paid action
- * (contact reveal). No real network calls; onSuccess fires after a simulated
- * STK-style approval prompt. Swap handlePay's setTimeout for a real
- * POST /api/momo/charge call + webhook-driven status once the backend exists.
+ * MomoPaymentModal — real Mobile Money checkout. Collects phone+network,
+ * then calls the caller-supplied `onSubmit(phone, providerId)` — which
+ * initiates the real charge against the backend and polls until the
+ * Paystack webhook confirms it (see MainApp's requestContact/requestBum/
+ * extendBumSession for what onSubmit actually does). This component only
+ * owns the UI state machine (form → confirm → pending → success/failed),
+ * not the payment logic itself.
  */
-function MomoPaymentModal({amount=15,currency="GHS",purposeLabel="Unlock contact",ownerName="the creator",instant=false,onClose,onSuccess}){
+function MomoPaymentModal({amount=15,currency="GHS",purposeLabel="Unlock contact",ownerName="the creator",instant=false,onClose,onSubmit,onSuccess}){
   const [stage,setStage]=useState("form"); // form | confirm | pending | success | failed
   const [phone,setPhone]=useState("");
   const [error,setError]=useState("");
+  const [failReason,setFailReason]=useState("");
   const [selectedNet,setSelectedNet]=useState(null);
   const [shakeKey,setShakeKey]=useState(0);
-  const timeoutRef=useRef(null);
   const net=selectedNet||detectMomoNetwork(phone);
-
-  useEffect(()=>()=>clearTimeout(timeoutRef.current),[]);
 
   const handleContinue=()=>{
     const digits=phone.replace(/\D/g,"");
@@ -1654,12 +1681,16 @@ function MomoPaymentModal({amount=15,currency="GHS",purposeLabel="Unlock contact
     if(!net){setError("Select your network");setShakeKey(k=>k+1);return;}
     setError("");setStage("confirm");
   };
-  const handlePay=()=>{
+  const handlePay=async()=>{
     setStage("pending");
-    timeoutRef.current=setTimeout(()=>{
+    try{
+      await onSubmit(phone.replace(/\D/g,""),net.id);
       setStage("success");
       setTimeout(()=>onSuccess&&onSuccess(),1100);
-    },2200);
+    }catch(err){
+      setFailReason(err?.message||"Payment didn't go through");
+      setStage("failed");
+    }
   };
 
   return (
@@ -1716,6 +1747,16 @@ function MomoPaymentModal({amount=15,currency="GHS",purposeLabel="Unlock contact
             <div style={{width:60,height:60,borderRadius:"50%",background:C.greenL,border:`2px solid ${C.green}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 16px"}}>✓</div>
             <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:6}}>Payment received</div>
             <div style={{fontSize:13,color:C.sub}}>Unlocking now…</div>
+          </div>
+        )}
+
+        {stage==="failed"&&(
+          <div style={{textAlign:"center",padding:"6px 0"}}>
+            <div style={{width:60,height:60,borderRadius:"50%",background:C.redL,border:`2px solid ${C.red}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,margin:"0 auto 16px"}}>✕</div>
+            <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:6}}>Payment didn't go through</div>
+            <div style={{fontSize:13,color:C.sub,marginBottom:20,lineHeight:1.5}}>{failReason}</div>
+            <button onClick={()=>{setStage("form");setFailReason("");}} style={{width:"100%",background:"linear-gradient(135deg,#FF3CAC,#A855F7)",border:"none",borderRadius:16,padding:"15px",color:"#fff",fontWeight:800,fontSize:15,cursor:"pointer",marginBottom:10}}>Try again</button>
+            <button onClick={onClose} style={{width:"100%",background:"transparent",border:"none",color:C.sub,fontWeight:700,fontSize:13,padding:8,cursor:"pointer"}}>Cancel</button>
           </div>
         )}
       </div>
@@ -2116,7 +2157,7 @@ function WelcomeScreen({onLogin,onSignup,onGuest}) {
 }
 
 // ── LOGIN SCREEN ──
-function LoginScreen({onBack,onSuccess,onForgot}) {
+function LoginScreen({onBack,onSuccess,onForgot,showToast}) {
   const [email,setEmail]=useState("");
   const [pwd,setPwd]=useState("");
   const [loading,setLoading]=useState(false);
@@ -2132,11 +2173,19 @@ function LoginScreen({onBack,onSuccess,onForgot}) {
     return e;
   };
 
-  const handleLogin=()=>{
+  const handleLogin=async()=>{
     const e=validate();
     if(Object.keys(e).length){setErrors(e);setShakeKey(k=>k+1);return;}
     setLoading(true);setErrors({});
-    setTimeout(()=>{setLoading(false);onSuccess();},1800);
+    try{
+      const {token,user}=await api.auth.login({email,password:pwd});
+      setToken(token);
+      onSuccess(user);
+    }catch(err){
+      setLoading(false);
+      setErrors({pwd:err.message||"Login failed"});
+      setShakeKey(k=>k+1);
+    }
   };
 
   return (
@@ -2169,9 +2218,13 @@ function LoginScreen({onBack,onSuccess,onForgot}) {
           </div>
 
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            <SocialBtn icon="🇬" label="Continue with Google" onClick={()=>{ setLoading(true); setTimeout(()=>{setLoading(false);onSuccess();},1400); }}/>
-            <SocialBtn icon="🍎" label="Continue with Apple" onClick={()=>{ setLoading(true); setTimeout(()=>{setLoading(false);onSuccess();},1400); }}/>
-            <SocialBtn icon="📘" label="Continue with Facebook" onClick={()=>{ setLoading(true); setTimeout(()=>{setLoading(false);onSuccess();},1400); }}/>
+            {/* Social login isn't backed by anything server-side yet — no OAuth
+                flow exists on the backend. Faking success here would create a
+                logged-in session with no real account, so these are disabled
+                with an honest message instead of a fake happy path. */}
+            <SocialBtn icon="🇬" label="Continue with Google" onClick={()=>showToast?.("Google sign-in coming soon — use email for now")}/>
+            <SocialBtn icon="🍎" label="Continue with Apple" onClick={()=>showToast?.("Apple sign-in coming soon — use email for now")}/>
+            <SocialBtn icon="📘" label="Continue with Facebook" onClick={()=>showToast?.("Facebook sign-in coming soon — use email for now")}/>
           </div>
         </div>
       </div>
@@ -2180,8 +2233,8 @@ function LoginScreen({onBack,onSuccess,onForgot}) {
 }
 
 // ── SIGNUP SCREEN ──
-function SignupScreen({onBack,onSuccess,onLogin}) {
-  const [step,setStep]=useState(1); // 1=details, 2=verify, 3=profile
+function SignupScreen({onBack,onSuccess,onLogin,showToast}) {
+  const [step,setStep]=useState(1); // 1=details, 2=verify (cosmetic — no real backend OTP), 3=profile
   const [form,setForm]=useState({name:"",handle:"",email:"",pwd:"",confirmPwd:"",dob:"",otp:""});
   const [errors,setErrors]=useState({});
   const [loading,setLoading]=useState(false);
@@ -2189,21 +2242,34 @@ function SignupScreen({onBack,onSuccess,onLogin}) {
   const [handleAvail,setHandleAvail]=useState(null);
   const [handleFlag,setHandleFlag]=useState(null); // {flagged,reason} from scanContactInfo
   const [handleSuggestions,setHandleSuggestions]=useState([]);
+  const [createdUser,setCreatedUser]=useState(null); // set once the real account exists (after step1)
   const handleRef=useRef(null);
 
   const set=k=>v=>setForm(p=>({...p,[k]:v}));
 
+  // Live availability check hits the real backend the moment they stop
+  // typing — the actual authoritative check still happens at signup time
+  // (handled via the 409 branch in handleStep1), since a handle could be
+  // taken by someone else between this check and submission.
   useEffect(()=>{
     clearTimeout(handleRef.current);
     if(!form.handle||form.handle.length<3){setHandleAvail(null);setHandleFlag(null);setHandleSuggestions([]);return;}
     const flag=scanContactInfo(form.handle);
     setHandleFlag(flag.flagged?flag:null);
     if(flag.flagged){setHandleAvail(null);setHandleSuggestions(suggestHandles(form.handle));return;}
-    handleRef.current=setTimeout(()=>{
-      const taken=["amarabeats","zarawave","salsaqueen","nanagold","islandvibe","afrogyal","shakystar"];
-      const avail=!taken.includes(form.handle.toLowerCase());
-      setHandleAvail(avail);
-      setHandleSuggestions(avail?[]:suggestHandles(form.handle));
+    handleRef.current=setTimeout(async()=>{
+      try{
+        // No public unauthenticated "is handle taken" endpoint exists, so this
+        // piggybacks on the fact that GET /users/:handle 404s if free. It
+        // requires *some* auth token — if the browser has a stale token from
+        // a previous session, this still works fine (404 vs found is what matters).
+        await api.users.get(form.handle);
+        setHandleAvail(false);
+        setHandleSuggestions(suggestHandles(form.handle));
+      }catch(err){
+        if(err.status===404){setHandleAvail(true);setHandleSuggestions([]);}
+        else{setHandleAvail(null);} // couldn't check (not logged in yet, network issue) — fall back to letting signup itself catch a collision
+      }
     },600);
   },[form.handle]);
 
@@ -2227,11 +2293,24 @@ function SignupScreen({onBack,onSuccess,onLogin}) {
     return e;
   };
 
-  const handleStep1=()=>{
+  const handleStep1=async()=>{
     const e=validateStep1();
     if(Object.keys(e).length){setErrors(e);setShakeKey(k=>k+1);return;}
     setLoading(true);setErrors({});
-    setTimeout(()=>{setLoading(false);setStep(2);},1200);
+    try{
+      // The real account is created HERE, not at the end of the wizard —
+      // step 2 (OTP) and step 3 (style picker) are cosmetic beyond this point.
+      const {token,user}=await api.auth.signup({email:form.email,password:form.pwd,handle:form.handle,name:form.name});
+      setToken(token);
+      setCreatedUser(user);
+      setLoading(false);
+      setStep(2);
+    }catch(err){
+      setLoading(false);
+      const field=/email/i.test(err.message)?"email":/handle|username/i.test(err.message)?"handle":"pwd";
+      setErrors({[field]:err.message});
+      setShakeKey(k=>k+1);
+    }
   };
 
   const handleStep2=()=>{
@@ -2241,8 +2320,7 @@ function SignupScreen({onBack,onSuccess,onLogin}) {
   };
 
   const handleStep3=()=>{
-    setLoading(true);
-    setTimeout(()=>{setLoading(false);onSuccess();},1500);
+    onSuccess(createdUser);
   };
 
   const handleAvailIcon=handleAvail===null?null:handleAvail?<span style={{color:C.green,fontSize:14,fontWeight:700}}>✓</span>:<span style={{color:"#FF3B5C",fontSize:14}}>✗</span>;
@@ -2433,14 +2511,19 @@ function MainApp() {
   const [liked,setLiked]=useState({});
   const [posts,setPosts]=useState(INIT_POSTS);
   const [shorts,setShorts]=useState(INIT_SHORTS);
-  const [users]=useState(INIT_USERS);
+  // users/contactRequests/bumRequests/notifs are now loaded from the real
+  // backend (see loadCoreData below) — posts/shorts above stay mock, since
+  // the content/social layer wasn't part of this wiring pass (see PR notes).
+  const [users,setUsers]=useState([]);
+  const [dataLoading,setDataLoading]=useState(true);
+  const [dataError,setDataError]=useState(null);
   const [following,setFollowing]=useState([]);
-  const [contactRequests,setContactRequests]=useState({sent:[],received:[1,3]});
+  const [contactRequests,setContactRequests]=useState({sent:[],received:[]});
   const [approvedContacts,setApprovedContacts]=useState([]);
-  const [bumRequests,setBumRequests]=useState({sent:[],received:[{id:1,mins:30}]});
+  const [bumRequests,setBumRequests]=useState({sent:[],received:[]});
   const [approvedBum,setApprovedBum]=useState([]);
   const [activeBumSession,setActiveBumSession]=useState(null); // {id,mins,remainingSec,extensions}
-  const [notifs,setNotifs]=useState(INIT_NOTIFS);
+  const [notifs,setNotifs]=useState([]);
   const [toast,setToast]=useState(null);
   const [profileUser,setProfileUser]=useState(null);
   const [profileVideoUser,setProfileVideoUser]=useState(null);
@@ -2456,42 +2539,128 @@ function MainApp() {
   const [showMyChallenges,setShowMyChallenges]=useState(false);
   const [showContactReqs,setShowContactReqs]=useState(false);
   const [momoTarget,setMomoTarget]=useState(null); // {user, kind:'contact'|'bum'} — item currently being paid for
-  const [chats,setChats]=useState({}); // {userId: [{id,from,text,time}]}
+  const [chats,setChats]=useState({}); // {userId: [{id,from,text,time}]} — cache of fetched messages, refetched per-open
   const [chatUser,setChatUser]=useState(null); // user currently open in ChatScreen
   const toastRef=useRef(null);
+
+  // Maps backend contact-request/bum-session shape (creatorId/payerId as raw
+  // ids) into the {sent:[...], received:[...]} shape the existing UI
+  // components expect, using the fetched `users` list (+ ME) to resolve ids
+  // to full user objects for display.
+  const resolveUser=(id,usersList)=>id===ME.id?ME:(usersList.find(u=>u.id===id)||{id,name:"Unknown",handle:"",badge:"Newcomer"});
+
+  const loadCoreData=async(usersOverride)=>{
+    try{
+      const [usersRes,crSent,crReceived,bsSent,bsReceived,bsActive,notifsRes]=await Promise.all([
+        usersOverride?Promise.resolve({users:usersOverride}):api.users.list(),
+        api.contactRequests.sent(),api.contactRequests.received(),
+        api.bumSessions.sent(),api.bumSessions.received(),api.bumSessions.active(),
+        api.notifications.list(),
+      ]);
+      const mappedUsers=usersOverride||usersRes.users.map(mapUser);
+      setUsers(mappedUsers);
+
+      const approved=crSent.requests.filter(r=>r.status==="approved").map(r=>r.creatorId);
+      setApprovedContacts(approved);
+      setContactRequests({
+        sent:crSent.requests.filter(r=>["pending","paid_hold"].includes(r.status)).map(r=>r.creatorId),
+        received:crReceived.requests.map(r=>r.creatorId),
+      });
+
+      const approvedB=bsActive.sessions.map(s=>({id:s.creatorId===ME.id?s.payerId:s.creatorId,mins:s.mins,_backendId:s.id,_status:s.status}));
+      setApprovedBum(approvedB);
+      setBumRequests({
+        sent:bsSent.sessions?.filter(r=>["pending","paid_hold"].includes(r.status)).map(r=>({id:r.creatorId,mins:r.mins}))||[],
+        received:bsReceived.sessions.map(r=>({id:r.payerId,mins:r.mins,_backendId:r.id})),
+      });
+
+      setNotifs(notifsRes.notifications.map(n=>({id:n.id,type:n.type,msg:n.text,time:timeAgo(n.createdAt),read:n.read,user:ME})));
+      setDataError(null);
+    }catch(err){
+      setDataError(err.message||"Couldn't load your data");
+    }finally{
+      setDataLoading(false);
+    }
+  };
+
+  useEffect(()=>{ loadCoreData(); },[]);
 
   const showToast=msg=>{setToast(msg);clearTimeout(toastRef.current);toastRef.current=setTimeout(()=>setToast(null),3200);};
 
   // openProfile opens the full profile video modal
   const openProfile=user=>{setProfileVideoUser(user);};
 
-  // requestContact/requestBum open the MoMo payment sheet; the request is only added to
-  // "sent" (and funds held) once payment succeeds — see MomoPaymentModal onSuccess below.
+  // requestContact/requestBum open the MoMo payment sheet; the actual charge
+  // + webhook-confirmation polling happens in momoOnSubmit below, wired to
+  // MomoPaymentModal's onSubmit prop.
   const requestContact=user=>{setMomoTarget({user,kind:"contact"});};
   const requestBum=(user,mins)=>{setMomoTarget({user,kind:"bum",mins});};
 
-  // openChat is only reachable for users already in approvedContacts (paid + owner-approved),
-  // enforced at the call sites (UserSheet, ContactRequestsScreen) rather than here.
-  const openChat=user=>{setChatUser(user);};
-  const sendMessage=text=>{
+  const momoOnSubmit=async(phone,provider)=>{
+    if(!momoTarget)return;
+    if(momoTarget.kind==="contact"){
+      const{contactRequest}=await api.contactRequests.initiate({creatorHandle:momoTarget.user.handle,phone,provider});
+      const final=await pollUntil(()=>api.contactRequests.get(contactRequest.id),r=>r.contactRequest.status!=="pending");
+      if(final.contactRequest.status!=="paid_hold")throw new Error("Payment wasn't confirmed by your network — try again.");
+    }else if(momoTarget.kind==="bum"){
+      const{bumSession}=await api.bumSessions.initiate({creatorHandle:momoTarget.user.handle,mins:momoTarget.mins,phone,provider});
+      const final=await pollUntil(()=>api.bumSessions.get(bumSession.id),r=>r.bumSession.status!=="pending");
+      if(final.bumSession.status!=="paid_hold")throw new Error("Payment wasn't confirmed by your network — try again.");
+    }else if(momoTarget.kind==="bum-extend"){
+      const beforeExt=activeBumSession?.extensions??0;
+      const{extension}=await api.bumSessions.extend(momoTarget.bumSessionBackendId,{phone,provider});
+      const final=await pollUntil(()=>api.bumSessions.get(momoTarget.bumSessionBackendId),r=>r.bumSession.extensions>beforeExt||r.bumSession.status==="active"&&r.bumSession.extensions>beforeExt,{timeoutMs:45000});
+      setActiveBumSession(s=>s?{...s,remainingSec:final.bumSession.remainingSec,extensions:final.bumSession.extensions}:s);
+    }
+  };
+  const momoOnSuccess=async()=>{
+    const u=momoTarget?.user;
+    const kind=momoTarget?.kind;
+    setMomoTarget(null);
+    if(kind==="contact")showToast(`Payment held in escrow — request sent to ${u.name}! 📬`);
+    else if(kind==="bum")showToast(`Payment held in escrow — ${momoTarget.mins}-min session request sent to ${u.name}! 🍑`);
+    else if(kind==="bum-extend")showToast(`+15 min added! 🍑⏱️`);
+    await loadCoreData(users); // resync sent/received/approved lists from backend, reuse already-fetched users list
+  };
+
+  // openChat fetches the real message history — only reachable for users
+  // already in approvedContacts (enforced at the call sites, UserSheet/
+  // ContactRequestsScreen), matching the backend's own 403 if bypassed.
+  const openChat=async user=>{
+    setChatUser(user);
+    try{
+      const{messages}=await api.chat.messages(user.id);
+      setChats(p=>({...p,[user.id]:messages.map(m=>({id:m.id,from:m.senderId===ME.id?"me":"them",text:m.text,time:new Date(m.createdAt.replace(" ","T")+"Z").toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}))}));
+    }catch(err){
+      showToast(err.message||"Couldn't load messages");
+    }
+  };
+  const sendMessage=async text=>{
     if(!chatUser)return;
-    const time=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
-    setChats(p=>({...p,[chatUser.id]:[...(p[chatUser.id]||[]),{id:Date.now(),from:"me",text,time}]}));
-    // Demo-only simulated reply — replace with real-time messaging (websocket/push) in production.
-    setTimeout(()=>{
-      setChats(p=>({...p,[chatUser.id]:[...(p[chatUser.id]||[]),{id:Date.now()+1,from:"them",text:"Hey! Thanks for reaching out 💃",time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}]}));
-    },1400);
+    try{
+      const{message}=await api.chat.send(chatUser.id,text);
+      setChats(p=>({...p,[chatUser.id]:[...(p[chatUser.id]||[]),{id:message.id,from:"me",text:message.text,time:new Date(message.createdAt.replace(" ","T")+"Z").toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}]}));
+    }catch(err){
+      showToast(err.message||"Message couldn't be sent");
+    }
   };
   const blockChat=()=>{
+    // No report/block endpoint exists on the backend yet — this still
+    // updates local UI state so the flow doesn't dead-end, but it does NOT
+    // persist server-side. Flagging clearly rather than pretending it's real.
     if(!chatUser)return;
     setApprovedContacts(p=>p.filter(x=>x!==chatUser.id));
-    showToast(`${chatUser.name} reported and blocked 🚫`);
+    showToast(`${chatUser.name} blocked locally — server-side report/block isn't built yet 🚫`);
     setChatUser(null);
   };
 
   // Single ticking interval for the active Live Bum session — restarts only when the
   // session identity changes (start/end), not on every second, so extensions just
-  // update the shared remainingSec value the interval is already reading.
+  // update the shared remainingSec value the interval is already reading. The
+  // backend is the source of truth (computed from startedAt+totalSec, not
+  // ticked server-side either — see backend/src/lib/bumTime.js) — this local
+  // tick just keeps the UI smooth between the real values fetched on
+  // start/extend, and will drift slightly until the next real fetch.
   useEffect(()=>{
     if(!activeBumSession)return;
     const iv=setInterval(()=>{
@@ -2504,19 +2673,61 @@ function MainApp() {
     return()=>clearInterval(iv);
   },[activeBumSession?.id]);
 
-  const startBumSession=sess=>{setActiveBumSession({id:sess.id,mins:sess.mins,remainingSec:sess.mins*60,extensions:0});};
-  const endBumSession=()=>{
-    if(activeBumSession)setApprovedBum(p=>p.filter(s=>s.id!==activeBumSession.id));
-    showToast("Session ended 🍑");
-    setActiveBumSession(null);
+  const startBumSession=async sess=>{
+    try{
+      const{bumSession}=await api.bumSessions.start(sess._backendId);
+      setActiveBumSession({id:sess.id,mins:sess.mins,remainingSec:bumSession.remainingSec,extensions:bumSession.extensions,_backendId:sess._backendId});
+    }catch(err){
+      showToast(err.message||"Couldn't start session");
+    }
+  };
+  const endBumSession=async()=>{
+    if(!activeBumSession)return;
+    try{
+      await api.bumSessions.end(activeBumSession._backendId);
+      showToast("Session ended 🍑");
+    }catch(err){
+      showToast(err.message||"Couldn't end session cleanly — it may already be over");
+    }finally{
+      setActiveBumSession(null);
+      await loadCoreData(users);
+    }
   };
   const extendBumSession=()=>{
     if(!activeBumSession)return;
     const u=users.find(x=>x.id===activeBumSession.id);
     if(!u)return;
-    setMomoTarget({user:u,kind:"bum-extend"});
+    setMomoTarget({user:u,kind:"bum-extend",bumSessionBackendId:activeBumSession._backendId});
   };
   const activeBumUser=activeBumSession?users.find(x=>x.id===activeBumSession.id):null;
+
+  // Contact/Bum approve+decline — called from ContactRequestsScreen and
+  // CommunityTab, which used to mutate local state directly. Now they call
+  // the real backend and this refreshes everything from it afterward.
+  const approveContact=async creatorRequestUserId=>{
+    const req=(await api.contactRequests.received()).requests.find(r=>r.creatorId===ME.id&&r.status==="paid_hold"&&r.payerId===creatorRequestUserId);
+    if(!req){showToast("Request no longer available");return;}
+    try{ await api.contactRequests.approve(req.id); showToast("Contact approved! 🎉"); }
+    catch(err){ showToast(err.message||"Couldn't approve"); }
+    await loadCoreData(users);
+  };
+  const declineContact=async payerUserId=>{
+    const req=(await api.contactRequests.received()).requests.find(r=>r.creatorId===ME.id&&r.status==="paid_hold"&&r.payerId===payerUserId);
+    if(!req){showToast("Request no longer available");return;}
+    try{ await api.contactRequests.decline(req.id); showToast("Request declined."); }
+    catch(err){ showToast(err.message||"Couldn't decline"); }
+    await loadCoreData(users);
+  };
+  const approveBumReq=async bumBackendId=>{
+    try{ await api.bumSessions.approve(bumBackendId); showToast("Live Bum session confirmed — payout released! 🍑💸"); }
+    catch(err){ showToast(err.message||"Couldn't approve"); }
+    await loadCoreData(users);
+  };
+  const declineBumReq=async bumBackendId=>{
+    try{ await api.bumSessions.decline(bumBackendId); showToast("Session declined — payer refunded."); }
+    catch(err){ showToast(err.message||"Couldn't decline"); }
+    await loadCoreData(users);
+  };
 
   const shared={
     liked,setLiked,posts,setPosts,shorts,setShorts,users,following,setFollowing,
@@ -2524,6 +2735,7 @@ function MainApp() {
     bumRequests,setBumRequests,approvedBum,setApprovedBum,showToast,setProfileUser,setActiveTab:setTab,
     setShowUpload,setShowLive,setShowAdmin,setShowNotifs,notifs,setNotifs,openProfile,
     requestContact,requestBum,openChat,startBumSession,
+    approveContact,declineContact,approveBumReq,declineBumReq,
   };
 
   const unread=notifs.filter(n=>!n.read).length;
@@ -2538,6 +2750,25 @@ function MainApp() {
     if(i===0&&unread>0)return unread;
     return 0;
   };
+
+  if(dataLoading){
+    return (
+      <div style={{minHeight:"100vh",background:`radial-gradient(ellipse at top,#2e0a40,${C.bg})`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+        <Logo size="lg"/>
+        <div style={{width:24,height:24,borderRadius:"50%",border:"3px solid rgba(255,255,255,0.15)",borderTop:"3px solid #FF3CAC",animation:"spinRing 1s linear infinite"}}/>
+      </div>
+    );
+  }
+  if(dataError){
+    return (
+      <div style={{minHeight:"100vh",background:`radial-gradient(ellipse at top,#2e0a40,${C.bg})`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,padding:32,textAlign:"center"}}>
+        <div style={{fontSize:44}}>📡</div>
+        <div style={{fontFamily:"'Pacifico',cursive",fontSize:20,color:C.text}}>Can't reach Shakybum</div>
+        <div style={{fontSize:13,color:C.sub,lineHeight:1.6,maxWidth:280}}>{dataError}</div>
+        <button onClick={()=>{setDataLoading(true);loadCoreData();}} style={{background:"linear-gradient(135deg,#FF3CAC,#A855F7)",border:"none",borderRadius:14,padding:"12px 28px",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}}>Try again</button>
+      </div>
+    );
+  }
 
   return (
     <div style={{fontFamily:"'DM Sans',sans-serif",background:C.bg,minHeight:"100vh",maxWidth:390,margin:"0 auto",position:"relative",color:C.text}}>
@@ -2557,7 +2788,7 @@ function MainApp() {
       {showMyVideos&&<MyVideosScreen onClose={()=>setShowMyVideos(false)} showToast={showToast}/>}
       {showSavedMoves&&<SavedMovesScreen onClose={()=>setShowSavedMoves(false)} showToast={showToast}/>}
       {showMyChallenges&&<MyChallengesScreen onClose={()=>setShowMyChallenges(false)} showToast={showToast}/>}
-      {showContactReqs&&<ContactRequestsScreen onClose={()=>setShowContactReqs(false)} showToast={showToast} contactRequests={contactRequests} setContactRequests={setContactRequests} approvedContacts={approvedContacts} setApprovedContacts={setApprovedContacts} users={users} openChat={u=>{setShowContactReqs(false);openChat(u);}}/>}
+      {showContactReqs&&<ContactRequestsScreen onClose={()=>setShowContactReqs(false)} showToast={showToast} contactRequests={contactRequests} approvedContacts={approvedContacts} users={users} openChat={u=>{setShowContactReqs(false);openChat(u);}} approveContact={approveContact} declineContact={declineContact}/>}
       {chatUser&&(
         <ChatScreen
           user={chatUser}
@@ -2575,20 +2806,8 @@ function MainApp() {
           ownerName={momoTarget.user.name}
           instant={momoTarget.kind==="bum-extend"}
           onClose={()=>setMomoTarget(null)}
-          onSuccess={()=>{
-            const u=momoTarget.user;
-            if(momoTarget.kind==="bum"){
-              setBumRequests(p=>({...p,sent:[...(p.sent||[]),{id:u.id,mins:momoTarget.mins}]}));
-              showToast(`Payment held in escrow — ${momoTarget.mins}-min session request sent to ${u.name}! 🍑`);
-            }else if(momoTarget.kind==="bum-extend"){
-              setActiveBumSession(s=>s?{...s,remainingSec:s.remainingSec+BUM_EXTEND_MIN*60,extensions:s.extensions+1}:s);
-              showToast(`+${BUM_EXTEND_MIN} min added! 🍑⏱️`);
-            }else{
-              setContactRequests(p=>({...p,sent:[...(p.sent||[]),u.id]}));
-              showToast(`Payment held in escrow — request sent to ${u.name}! 📬`);
-            }
-            setMomoTarget(null);
-          }}
+          onSubmit={momoOnSubmit}
+          onSuccess={momoOnSuccess}
         />
       )}
       {activeBumSession&&activeBumUser&&(
@@ -2650,6 +2869,39 @@ function MainApp() {
 // ── MAIN AUTH FLOW ──
 export default function ShakybumApp() {
   const [screen,setScreen]=useState("welcome"); // welcome | login | signup | forgot | app
+  const [checkingSession,setCheckingSession]=useState(true);
+  const [toast,setToast]=useState(null);
+  const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(null),3200);};
+
+  // On load, if a token from a previous session exists, validate it and
+  // skip straight to the app instead of making them log in again.
+  useEffect(()=>{
+    (async()=>{
+      const token=getToken();
+      if(!token){setCheckingSession(false);return;}
+      try{
+        const{user}=await api.auth.me();
+        Object.assign(ME,mapUser(user));
+        setScreen("app");
+      }catch{
+        clearToken(); // expired/invalid token — fall through to welcome screen
+      }
+      setCheckingSession(false);
+    })();
+  },[]);
+
+  const onAuthed=user=>{
+    Object.assign(ME,mapUser(user));
+    setScreen("app");
+  };
+
+  if(checkingSession){
+    return (
+      <div style={{minHeight:"100vh",background:`radial-gradient(ellipse at top,#2e0a40,${C.bg})`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <Logo size="lg"/>
+      </div>
+    );
+  }
 
   if(screen==="app") {
     return <MainApp/>;
@@ -2658,10 +2910,11 @@ export default function ShakybumApp() {
   return (
     <>
       <GS/>
-      {screen==="welcome"&&<WelcomeScreen onLogin={()=>setScreen("login")} onSignup={()=>setScreen("signup")} onGuest={()=>setScreen("app")}/>}
-      {screen==="login"&&<LoginScreen onBack={()=>setScreen("welcome")} onSuccess={()=>setScreen("app")} onForgot={()=>setScreen("forgot")}/>}
-      {screen==="signup"&&<SignupScreen onBack={()=>setScreen("welcome")} onSuccess={()=>setScreen("app")} onLogin={()=>setScreen("login")}/>}
+      {screen==="welcome"&&<WelcomeScreen onLogin={()=>setScreen("login")} onSignup={()=>setScreen("signup")} onGuest={()=>{showToast("Guest mode has limited features — sign up to unlock payments and chat");setScreen("app");}}/>}
+      {screen==="login"&&<LoginScreen onBack={()=>setScreen("welcome")} onSuccess={onAuthed} onForgot={()=>setScreen("forgot")} showToast={showToast}/>}
+      {screen==="signup"&&<SignupScreen onBack={()=>setScreen("welcome")} onSuccess={onAuthed} onLogin={()=>setScreen("login")} showToast={showToast}/>}
       {screen==="forgot"&&<ForgotScreen onBack={()=>setScreen("login")} onSuccess={()=>setScreen("login")}/>}
+      {toast&&<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:12,padding:"11px 18px",color:C.text,fontSize:13,fontWeight:600,zIndex:999,boxShadow:"0 8px 24px rgba(0,0,0,0.4)",maxWidth:320,textAlign:"center"}}>{toast}</div>}
     </>
   );
 }

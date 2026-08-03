@@ -5,14 +5,27 @@ import { usersRepo, toPublicUser } from "../repositories/users.js";
 import { scanContactInfo } from "../lib/contactScan.js";
 import { createTransferRecipient, MOMO_PROVIDERS } from "../lib/paystack.js";
 import { priceForContact, priceForBum, BUM_DURATIONS, BUM_OK_BADGES } from "../lib/pricing.js";
+import { postsRepo, followsRepo } from "../repositories/social.js";
 
 const router = Router();
+
+// Attaches real activity counts a user list needs for display (badge
+// context, "X followers" etc) — separate from toPublicUser since those
+// counts aren't stored on the user row itself (see repositories/social.js).
+function withCounts(user) {
+  return {
+    ...toPublicUser(user),
+    movesCount: postsRepo.countByUser(user.id),
+    followersCount: followsRepo.followerCount(user.id),
+    followingCount: followsRepo.followingCount(user.id),
+  };
+}
 
 router.get("/", requireAuth, (req, res) => {
   const users = usersRepo.list().filter((u) => u.id !== req.user.id);
   res.json({
     users: users.map((u) => ({
-      ...toPublicUser(u),
+      ...withCounts(u),
       contactPrice: priceForContact(u.badge),
       canBum: BUM_OK_BADGES.includes(u.badge) && u.bumEnabled,
       bumPrices: BUM_OK_BADGES.includes(u.badge) && u.bumEnabled
@@ -25,7 +38,7 @@ router.get("/", requireAuth, (req, res) => {
 router.get("/:handle", requireAuth, (req, res) => {
   const user = usersRepo.findByHandle(req.params.handle);
   if (!user) return res.status(404).json({ error: "User not found" });
-  res.json({ user: toPublicUser(user), contactPrice: priceForContact(user.badge) });
+  res.json({ user: withCounts(user), contactPrice: priceForContact(user.badge) });
 });
 
 router.patch("/me", requireAuth, asyncHandler(async (req, res) => {
