@@ -119,7 +119,7 @@ export async function handleChargeSuccess(reference) {
     const bs = bumSessionsRepo.setStatus(payment.refId, "paid_hold");
     notificationsRepo.create({
       userId: bs.creatorId, type: "bum_request",
-      text: `New Bum session request (${bs.mins} min) — GHS ${payment.amount.toFixed(2)} held in escrow.`,
+      text: `New Live Bum session request (${bs.mins} min) — GHS ${payment.amount.toFixed(2)} held in escrow.`,
     });
     return { handled: true, kind: "bum", bumSession: bs };
   }
@@ -161,7 +161,7 @@ async function releaseCreatorPayout({ creator, payment }) {
   // Paystack accepting the transfer request means it's IN PROGRESS, not
   // settled — actual completion is confirmed asynchronously via the
   // transfer.success/transfer.failed webhook (see routes/payments.routes.js).
-  // The domain object (contact request / Bum session) still flips to
+  // The domain object (contact request / Live Bum session) still flips to
   // "approved" right away for UX — reversing that after the fact would be
   // worse than the alternative, so a failed transfer becomes a flagged
   // reconciliation case (see handleTransferFailed) rather than an undo.
@@ -201,7 +201,7 @@ export async function declineContactRequest({ contactRequestId, actingUser }) {
 
 export async function approveBumSession({ bumSessionId, actingUser }) {
   const bs = bumSessionsRepo.findById(bumSessionId);
-  if (!bs) throw new EscrowError("Bum session not found", 404);
+  if (!bs) throw new EscrowError("Live Bum session not found", 404);
   if (bs.creatorId !== actingUser.id) throw new EscrowError("Not your session to approve", 403);
   if (bs.status !== "paid_hold") throw new EscrowError(`Cannot approve a session in status '${bs.status}'`);
 
@@ -209,28 +209,28 @@ export async function approveBumSession({ bumSessionId, actingUser }) {
   await releaseCreatorPayout({ creator: actingUser, payment });
   const updated = bumSessionsRepo.setStatus(bumSessionId, "approved");
 
-  notificationsRepo.create({ userId: bs.payerId, type: "bum_approved", text: `${actingUser.name} confirmed your ${bs.mins}-min Bum session!` });
+  notificationsRepo.create({ userId: bs.payerId, type: "bum_approved", text: `${actingUser.name} confirmed your ${bs.mins}-min Live Bum session!` });
   return updated;
 }
 
 export async function declineBumSession({ bumSessionId, actingUser }) {
   const bs = bumSessionsRepo.findById(bumSessionId);
-  if (!bs) throw new EscrowError("Bum session not found", 404);
+  if (!bs) throw new EscrowError("Live Bum session not found", 404);
   if (bs.creatorId !== actingUser.id) throw new EscrowError("Not your session to decline", 403);
   if (bs.status !== "paid_hold") throw new EscrowError(`Cannot decline a session in status '${bs.status}'`);
 
-  await refundTransaction({ reference: bs.paystackReference, reason: "Bum session declined" });
+  await refundTransaction({ reference: bs.paystackReference, reason: "Live Bum session declined" });
   const payment = paymentsRepo.findByReference(bs.paystackReference);
   paymentsRepo.setRefundReference(payment.id, bs.paystackReference);
   const updated = bumSessionsRepo.setStatus(bumSessionId, "declined");
 
-  notificationsRepo.create({ userId: bs.payerId, type: "bum_declined", text: `Your Bum session request was declined and refunded.` });
+  notificationsRepo.create({ userId: bs.payerId, type: "bum_declined", text: `Your Live Bum session request was declined and refunded.` });
   return updated;
 }
 
 export async function startBumSession({ bumSessionId, actingUser }) {
   const bs = bumSessionsRepo.findById(bumSessionId);
-  if (!bs) throw new EscrowError("Bum session not found", 404);
+  if (!bs) throw new EscrowError("Live Bum session not found", 404);
   if (![bs.payerId, bs.creatorId].includes(actingUser.id)) throw new EscrowError("Not a participant in this session", 403);
   if (bs.status !== "approved") throw new EscrowError(`Cannot start a session in status '${bs.status}'`);
   return bumSessionsRepo.start(bumSessionId);
@@ -238,7 +238,7 @@ export async function startBumSession({ bumSessionId, actingUser }) {
 
 export async function endBumSession({ bumSessionId, actingUser }) {
   const bs = bumSessionsRepo.findById(bumSessionId);
-  if (!bs) throw new EscrowError("Bum session not found", 404);
+  if (!bs) throw new EscrowError("Live Bum session not found", 404);
   if (![bs.payerId, bs.creatorId].includes(actingUser.id)) throw new EscrowError("Not a participant in this session", 403);
   if (bs.status !== "active") throw new EscrowError(`Cannot end a session in status '${bs.status}'`);
   return bumSessionsRepo.end(bumSessionId);
@@ -282,7 +282,7 @@ export async function handleTransferFailed(reference, failureReason) {
     creatorId = ext ? bumSessionsRepo.findById(ext.bumSessionId)?.creatorId : null;
   }
 
-  // The contact/Bum session was already marked "approved" and the payer
+  // The contact/Live Bum session was already marked "approved" and the payer
   // already saw the result (contact info revealed / session confirmed) —
   // reversing that would be worse than the alternative. This is now a
   // financial reconciliation case: the creator is owed money the platform

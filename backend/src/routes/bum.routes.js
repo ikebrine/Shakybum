@@ -24,7 +24,7 @@ router.post("/", requireAuth, asyncHandler(async (req, res) => {
   const creator = usersRepo.findByHandle(creatorHandle);
   if (!creator) return res.status(404).json({ error: "Creator not found" });
   if (!BUM_OK_BADGES.includes(creator.badge) || !creator.bumEnabled) {
-    return res.status(400).json({ error: "This creator isn't offering Bum sessions" });
+    return res.status(400).json({ error: "This creator isn't offering Live Bum sessions" });
   }
 
   const { bumSession, charge } = await initiateBumPayment({

@@ -74,13 +74,13 @@ router.post("/me/payout-destination", requireAuth, asyncHandler(async (req, res)
   res.json({ user: toPublicUser(updated) });
 }));
 
-// Creator opts in/out of offering Bum sessions. Gated on badge tier — badge
+// Creator opts in/out of offering Live Bum sessions. Gated on badge tier — badge
 // itself isn't self-settable (it should reflect a reputation/activity system
 // that isn't part of this backend's scope yet; see README "Known gaps").
 router.patch("/me/bum-settings", requireAuth, (req, res) => {
   const { bumEnabled } = req.body;
   if (bumEnabled && !BUM_OK_BADGES.includes(req.user.badge)) {
-    return res.status(403).json({ error: `Bum sessions require Silver Queen badge or higher (currently: ${req.user.badge})` });
+    return res.status(403).json({ error: `Live Bum sessions require Silver Queen badge or higher (currently: ${req.user.badge})` });
   }
   const updated = usersRepo.updateBumEnabled(req.user.id, !!bumEnabled);
   res.json({ user: toPublicUser(updated) });

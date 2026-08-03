@@ -55,9 +55,9 @@ const LIVE_OK=["Gold Queen","Platinum","Diamond"];
 // in production; this map is UI-only.
 const CONTACT_PRICE={"Newcomer":5,"Rising Star":8,"Silver Queen":12,"Gold Queen":15,"Platinum":25,"Diamond":40};
 const priceFor=user=>CONTACT_PRICE[user?.badge]||10;
-// Bum sessions are a premium, private product — priced higher than a contact reveal,
+// Live Bum sessions are a premium, private product — priced higher than a contact reveal,
 // and only offered by Silver Queen+ creators who've opted in (bumEnabled).
-// Bum sessions are billed by duration, not flat rate — MoMo can't meter continuously
+// Live Bum sessions are billed by duration, not flat rate — MoMo can't meter continuously
 // (every charge is a one-time STK-style prompt), so we charge once per fixed-length
 // block instead of trying to run a live per-minute meter.
 const BUM_RATE_PER_MIN={"Silver Queen":1.2,"Gold Queen":2,"Platinum":3.5,"Diamond":6};
@@ -158,7 +158,7 @@ const INIT_NOTIFS=[
   {id:1,type:"like",     user:INIT_USERS[0],msg:"liked your Waist Wine video",        time:"2m", read:false},
   {id:2,type:"challenge",user:INIT_USERS[2],msg:"invited you to Shakira Showdown 🏆", time:"10m",read:false},
   {id:3,type:"contact",  user:INIT_USERS[1],msg:"requested your contact details 📬",  time:"30m",read:false},
-  {id:4,type:"bum",      user:INIT_USERS[0],msg:"sent you a Bum session request 🍑",  time:"45m",read:false},
+  {id:4,type:"bum",      user:INIT_USERS[0],msg:"sent you a Live Bum session request 🍑",  time:"45m",read:false},
   {id:5,type:"short",    user:INIT_USERS[3],msg:"posted a new ShakyShort 🎬",         time:"1h", read:true},
   {id:6,type:"live",     user:INIT_USERS[4],msg:"went live: Dancehall Masterclass 🔴", time:"2h", read:true},
 ];
@@ -294,7 +294,7 @@ function SettingsScreen({onClose,showToast}) {
         <Toggle val={watermarkOn} set={setWatermarkOn} icon="🍑" label="Shakybum Watermark" sub="Your videos always carry the Shakybum brand mark. Cannot be disabled for community trust." />
         <div style={{fontSize:11,color:C.sub,fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",margin:"20px 0 10px"}}>Features</div>
         <Toggle val={shorts} set={setShortsOn} icon="⚡" label="ShakyShorts" sub="Allow others to see your short videos in the Shorts feed." />
-        <Toggle val={notifOn} set={setNotifOn} icon="🔔" label="Push Notifications" sub="Get notified about likes, Bum requests, challenges and more." />
+        <Toggle val={notifOn} set={setNotifOn} icon="🔔" label="Push Notifications" sub="Get notified about likes, Live Bum requests, challenges and more." />
         <div style={{fontSize:11,color:C.sub,fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",margin:"20px 0 10px"}}>Account</div>
         {[["🎨","Edit Profile Theme"],["📊","Analytics & Insights"],["🔗","Linked Accounts"],["🌍","Language & Region"],["♿","Accessibility"],["📜","Community Guidelines"],["🔏","Two-Factor Authentication"],["🗑️","Delete Account",true]].map(([ic,label,danger])=>(
           <div key={label} onClick={()=>showToast(`${label} — coming soon`)} style={{background:C.bgCard,padding:"14px 16px",borderRadius:12,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,cursor:"pointer",border:`1px solid ${C.border}`,marginBottom:6,color:danger?"#FF3B5C":C.text}}>
@@ -328,7 +328,7 @@ function PrivacyScreen({onClose,showToast}) {
         {[
           {icon:"🔒",title:"Contact Visibility",desc:"Your email and phone are always hidden. Only users you approve can see them.",action:"Manage"},
           {icon:"🚫",title:"Blocked Users",desc:"Manage users you've blocked. They cannot see your profile, videos or contact you.",action:"View (0)"},
-          {icon:"🍑",title:"Bum Request Control",desc:"Only Silver Queen+ creators can receive paid Bum requests. You keep 70% of every session, held in escrow until you confirm.",action:"Manage"},
+          {icon:"🍑",title:"Bum Request Control",desc:"Only Silver Queen+ creators can receive paid Live Bum requests. You keep 70% of every session, held in escrow until you confirm.",action:"Manage"},
           {icon:"🎬",title:"Video Download Control",desc:"Choose who can download your videos. Shakybum watermark is always applied.",action:"Settings"},
           {icon:"📍",title:"Location Data",desc:"Shakybum does not collect or store your precise location data.",action:"Info"},
           {icon:"🗂️",title:"Download My Data",desc:"Request a copy of all your Shakybum data (GDPR Art. 20).",action:"Request"},
@@ -355,8 +355,8 @@ function PrivacyScreen({onClose,showToast}) {
 function HelpScreen({onClose,showToast}) {
   const [open,setOpen]=useState(null);
   const faqs=[
-    {q:"How do I get the BUM badge?",a:"You need to reach Silver Queen badge or higher and enable Bum sessions in your profile settings. Silver Queen requires 5+ moves posted and 500+ followers."},
-    {q:"How much do Bum sessions cost, and how do I get paid?",a:"Sessions are billed by duration — book 15 or 30 minutes, priced per-minute by badge tier (Silver Queen GHS 1.20/min up to Diamond GHS 6/min). The requester's payment is held until you confirm. Once confirmed, you receive 70% via Mobile Money — the remaining 30% is Shakybum's platform fee. Running long? Either side can pay to extend by 15 more minutes mid-session. Decline and the requester is refunded automatically."},
+    {q:"How do I get the LIVE BUM badge?",a:"You need to reach Silver Queen badge or higher and enable Live Bum sessions in your profile settings. Silver Queen requires 5+ moves posted and 500+ followers."},
+    {q:"How much do Live Bum sessions cost, and how do I get paid?",a:"Sessions are billed by duration — book 15 or 30 minutes, priced per-minute by badge tier (Silver Queen GHS 1.20/min up to Diamond GHS 6/min). The requester's payment is held until you confirm. Once confirmed, you receive 70% via Mobile Money — the remaining 30% is Shakybum's platform fee. Running long? Either side can pay to extend by 15 more minutes mid-session. Decline and the requester is refunded automatically."},
     {q:"How do contact requests work?",a:"Your contact details are hidden by default. When someone requests your contact, you'll get a notification. You can approve or decline — only after approval can they see your email and phone."},
     {q:"Can I unsend a Bum or contact request?",a:"Yes! Go to Community → Bum tab or Requests tab and tap 'Unsend' next to any pending request you've sent."},
     {q:"What is ShakyShorts?",a:"ShakyShorts are short looping videos (max 15 seconds) that appear in the Shorts feed — similar to TikTok or Reels. They disappear after 24 hours unless you pin them to your profile."},
@@ -468,7 +468,7 @@ function UserSheet({user,onClose,following,setFollowing,contactRequests,setConta
   const canBum=BUM_OK.includes(user.badge)&&user.bumEnabled;
 
   const unsendContact=()=>{setContactRequests(p=>({...p,sent:(p.sent||[]).filter(x=>x!==user.id)}));showToast("Contact request unsent 📭");};
-  const unsendBum=()=>{setBumRequests(p=>({...p,sent:(p.sent||[]).filter(r=>r.id!==user.id)}));showToast("Bum request unsent 🍑");};
+  const unsendBum=()=>{setBumRequests(p=>({...p,sent:(p.sent||[]).filter(r=>r.id!==user.id)}));showToast("Live Bum request unsent 🍑");};
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(5,0,14,0.88)",backdropFilter:"blur(14px)",zIndex:500,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
@@ -514,7 +514,7 @@ function UserSheet({user,onClose,following,setFollowing,contactRequests,setConta
                 ))}
               </div>
         )}
-        {!canBum&&<div style={{background:C.bgAlt,borderRadius:12,padding:"12px 14px",border:`1px solid ${C.border}`,textAlign:"center",fontSize:12,color:C.sub,marginBottom:10}}>🔒 Bum sessions require <span style={{color:C.gold,fontWeight:700}}>Silver Queen</span> badge or higher</div>}
+        {!canBum&&<div style={{background:C.bgAlt,borderRadius:12,padding:"12px 14px",border:`1px solid ${C.border}`,textAlign:"center",fontSize:12,color:C.sub,marginBottom:10}}>🔒 Live Bum sessions require <span style={{color:C.gold,fontWeight:700}}>Silver Queen</span> badge or higher</div>}
         {cOk&&(
           <div style={{background:C.greenL,borderRadius:12,padding:"12px 14px",border:`1px solid ${C.green}44`}}>
             <div style={{fontSize:12,color:C.green,fontWeight:700,marginBottom:4}}>✅ Contact Details</div>
@@ -563,7 +563,7 @@ function AdminPanel({onClose,users,showToast}) {
   const ranks=["Newcomer","Rising Star","Silver Queen","Gold Queen","Platinum","Diamond"];
   const badgeUp=id=>{setUList(p=>p.map(u=>{if(u.id!==id)return u;const i=ranks.indexOf(u.badge);return{...u,badge:ranks[Math.min(i+1,ranks.length-1)]};}));showToast("Badge upgraded! ✨");};
   const suspend=id=>{setUList(p=>p.map(u=>u.id===id?{...u,suspended:!u.suspended}:u));showToast("User status updated.");};
-  const nav=[{id:"overview",icon:"📊",label:"Overview"},{id:"users",icon:"👥",label:"Users"},{id:"bum",icon:"🍑",label:"Bum"},{id:"live",icon:"🔴",label:"Live"},{id:"reports",icon:"🚨",label:"Reports"}];
+  const nav=[{id:"overview",icon:"📊",label:"Overview"},{id:"users",icon:"👥",label:"Users"},{id:"bum",icon:"🍑",label:"Live Bum"},{id:"live",icon:"🔴",label:"Live"},{id:"reports",icon:"🚨",label:"Reports"}];
   return (
     <div style={{position:"fixed",inset:0,background:C.bg,zIndex:850,display:"flex",flexDirection:"column",maxWidth:390,margin:"0 auto"}}>
       <div style={{padding:"52px 20px 0",background:"linear-gradient(135deg,#1a0d2e,#0e0718)",borderBottom:`1px solid ${C.border}`}}>
@@ -591,7 +591,7 @@ function AdminPanel({onClose,users,showToast}) {
             </div>
             <div style={{background:C.bgCard,borderRadius:16,padding:"14px 16px",border:`1px solid ${C.border}`}}>
               <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12}}>Recent Activity</div>
-              {[["🍑","Bum request: amarabeats → zarawave","2m"],["⚡","5 new ShakyShorts posted","8m"],["🔴","Live started: islandvibe - Dancehall Class","15m"],["🚨","Report filed against a video post","20m"],["💃","3 new videos uploaded","30m"]].map(([ic,msg,t],i)=>(
+              {[["🍑","Live Bum request: amarabeats → zarawave","2m"],["⚡","5 new ShakyShorts posted","8m"],["🔴","Live started: islandvibe - Dancehall Class","15m"],["🚨","Report filed against a video post","20m"],["💃","3 new videos uploaded","30m"]].map(([ic,msg,t],i)=>(
                 <div key={i} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:`1px solid ${C.border}`,alignItems:"center"}}>
                   <span style={{fontSize:16}}>{ic}</span><span style={{flex:1,fontSize:12,color:C.sub}}>{msg}</span><span style={{fontSize:11,color:C.sub}}>{t}</span>
                 </div>
@@ -620,7 +620,7 @@ function AdminPanel({onClose,users,showToast}) {
         )}
         {section==="bum"&&(
           <div>
-            <div style={{fontFamily:"'Pacifico',cursive",fontSize:20,color:C.text,marginBottom:16}}>Bum Sessions 🍑</div>
+            <div style={{fontFamily:"'Pacifico',cursive",fontSize:20,color:C.text,marginBottom:16}}>Live Bum Sessions 🍑</div>
             <div style={{background:C.goldL,borderRadius:14,padding:"14px",border:`1px solid ${C.gold}33`,marginBottom:14}}>
               <div style={{fontSize:13,fontWeight:700,color:C.gold,marginBottom:8}}>Pricing Control</div>
               <div style={{display:"flex",gap:8}}>
@@ -633,7 +633,7 @@ function AdminPanel({onClose,users,showToast}) {
             </div>
             {[{from:"ShakyStar",to:"amarabeats",status:"pending"},{from:"zarawave",to:"salsaqueen",status:"active"},{from:"nanagold",to:"islandvibe",status:"completed"}].map((b,i)=>(
               <div key={i} style={{background:C.bgCard,borderRadius:14,padding:"14px",border:`1px solid ${C.border}`,marginBottom:10}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><div style={{fontSize:13,fontWeight:700,color:C.text}}>🍑 Bum Request</div><Bdg text={b.status.toUpperCase()} color={b.status==="active"?C.green:b.status==="pending"?C.gold:C.sub}/></div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><div style={{fontSize:13,fontWeight:700,color:C.text}}>🍑 Live Bum Request</div><Bdg text={b.status.toUpperCase()} color={b.status==="active"?C.green:b.status==="pending"?C.gold:C.sub}/></div>
                 <div style={{fontSize:12,color:C.sub,marginBottom:10}}>@{b.from} → @{b.to}</div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={()=>showToast("Reviewed")} style={{flex:1,background:C.purpleL,border:`1px solid ${C.purple}44`,borderRadius:10,padding:"7px",color:C.purple,fontWeight:700,fontSize:11,cursor:"pointer"}}>👁 Review</button>
@@ -659,7 +659,7 @@ function AdminPanel({onClose,users,showToast}) {
         {section==="reports"&&(
           <div>
             <div style={{fontFamily:"'Pacifico',cursive",fontSize:20,color:C.text,marginBottom:16}}>Reports 🚨</div>
-            {[{type:"Video",reporter:"zarawave",target:"nanagold",reason:"Inappropriate content",sev:"High"},{type:"Short",reporter:"afrogyal",target:"islandvibe",reason:"Harassment",sev:"Medium"},{type:"Bum",reporter:"salsaqueen",target:"amarabeats",reason:"Misuse",sev:"Low"}].map((r,i)=>(
+            {[{type:"Video",reporter:"zarawave",target:"nanagold",reason:"Inappropriate content",sev:"High"},{type:"Short",reporter:"afrogyal",target:"islandvibe",reason:"Harassment",sev:"Medium"},{type:"Live Bum",reporter:"salsaqueen",target:"amarabeats",reason:"Misuse",sev:"Low"}].map((r,i)=>(
               <div key={i} style={{background:C.bgCard,borderRadius:14,padding:"14px",border:"1px solid rgba(255,59,92,0.25)",marginBottom:10}}>
                 <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><div style={{fontSize:13,fontWeight:700,color:C.text}}>{r.type} Report</div><Bdg text={r.sev} color={r.sev==="High"?"#FF3B5C":r.sev==="Medium"?C.gold:C.sub}/></div>
                 <div style={{fontSize:12,color:C.sub,marginBottom:4}}>@{r.reporter} reported @{r.target}</div>
@@ -1003,8 +1003,8 @@ function CommunityTab({users,following,setFollowing,contactRequests,setContactRe
   const approve=uid=>{setApprovedContacts(p=>[...p,uid]);setContactRequests(p=>({...p,received:(p.received||[]).filter(x=>x!==uid)}));showToast("Contact approved! 🎉");};
   const deny=uid=>{setContactRequests(p=>({...p,received:(p.received||[]).filter(x=>x!==uid)}));showToast("Request declined.");};
   const unsendContact=uid=>{setContactRequests(p=>({...p,sent:(p.sent||[]).filter(x=>x!==uid)}));showToast("Contact request unsent 📭");};
-  const unsendBum=uid=>{setBumRequests(p=>({...p,sent:(p.sent||[]).filter(r=>r.id!==uid)}));showToast("Bum request unsent 🍑");};
-  const approveBum=req=>{setApprovedBum(p=>[...p,req]);setBumRequests(p=>({...p,received:(p.received||[]).filter(r=>r.id!==req.id)}));showToast("Bum session confirmed — payout released! 🍑💸");};
+  const unsendBum=uid=>{setBumRequests(p=>({...p,sent:(p.sent||[]).filter(r=>r.id!==uid)}));showToast("Live Bum request unsent 🍑");};
+  const approveBum=req=>{setApprovedBum(p=>[...p,req]);setBumRequests(p=>({...p,received:(p.received||[]).filter(r=>r.id!==req.id)}));showToast("Live Bum session confirmed — payout released! 🍑💸");};
   const denyBum=uid=>{setBumRequests(p=>({...p,received:(p.received||[]).filter(r=>r.id!==uid)}));showToast("Session declined — payer refunded.");};
 
   return (
@@ -1013,7 +1013,7 @@ function CommunityTab({users,following,setFollowing,contactRequests,setContactRe
         <div style={{fontFamily:"'Pacifico',cursive",fontSize:24,color:C.text,marginBottom:4}}>Community 👯</div>
         <div style={{fontSize:13,color:C.sub,marginBottom:14}}>Connect safely — contacts hidden until approved 🔒</div>
         <div style={{display:"flex",gap:6}}>
-          {[["discover","Discover"],["requests",`Requests${incoming.length?` (${incoming.length})`:""}`],["bum",`🍑 Bum${incomingBum.length?` (${incomingBum.length})`:""}`],["approved","Approved"]].map(([v,l])=>(
+          {[["discover","Discover"],["requests",`Requests${incoming.length?` (${incoming.length})`:""}`],["bum",`🍑 Live Bum${incomingBum.length?` (${incomingBum.length})`:""}`],["approved","Approved"]].map(([v,l])=>(
             <button key={v} onClick={()=>setView(v)} style={{flex:1,padding:"8px 3px",borderRadius:12,border:view===v?"none":`1px solid ${C.border}`,background:view===v?"linear-gradient(135deg,#FF3CAC,#A855F7)":C.bgAlt,color:view===v?"#fff":C.sub,fontSize:10,fontWeight:700,cursor:"pointer"}}>{l}</button>
           ))}
         </div>
@@ -1052,7 +1052,7 @@ function CommunityTab({users,following,setFollowing,contactRequests,setContactRe
                             <button key={mins} onClick={()=>{requestBum(u,mins);setDurPickerFor(null);}} style={{flex:1,background:"linear-gradient(135deg,#FFD700cc,#FF9A76cc)",border:"none",borderRadius:10,padding:"9px 2px",color:"#0E0718",fontWeight:800,fontSize:11,cursor:"pointer"}}>{mins}m·GHS{bumPriceFor(u,mins)}</button>
                           ))}
                         </div>
-                      :<button onClick={()=>setDurPickerFor(u.id)} style={{flex:1,background:"linear-gradient(135deg,#FFD700cc,#FF9A76cc)",border:"none",borderRadius:10,padding:"9px",color:"#0E0718",fontWeight:800,fontSize:12,cursor:"pointer"}}>🍑 Bum · from GHS {bumPriceFor(u,BUM_DURATIONS[0])}</button>
+                      :<button onClick={()=>setDurPickerFor(u.id)} style={{flex:1,background:"linear-gradient(135deg,#FFD700cc,#FF9A76cc)",border:"none",borderRadius:10,padding:"9px",color:"#0E0718",fontWeight:800,fontSize:12,cursor:"pointer"}}>🍑 Live Bum · from GHS {bumPriceFor(u,BUM_DURATIONS[0])}</button>
                 )}
               </div>
               {!u.allowDownload&&<div style={{marginTop:8,background:C.redL,borderRadius:8,padding:"6px 10px",fontSize:10,color:"#FF3B5C"}}>⬇️ Downloads disabled by this creator</div>}
@@ -1093,7 +1093,7 @@ function CommunityTab({users,following,setFollowing,contactRequests,setContactRe
         {view==="bum"&&(
           <>
             <div style={{background:C.goldL,borderRadius:16,padding:"14px 18px",border:`1px solid ${C.gold}30`,marginBottom:4}}>
-              <div style={{fontSize:13,fontWeight:700,color:C.gold,marginBottom:4}}>🍑 Bum Sessions</div>
+              <div style={{fontSize:13,fontWeight:700,color:C.gold,marginBottom:4}}>🍑 Live Bum Sessions</div>
               <div style={{fontSize:12,color:C.sub,lineHeight:1.65}}>Billed by duration ({BUM_DURATIONS.join("/")}min blocks). Payment is held until you confirm — you keep {Math.round((1-PLATFORM_CUT)*100)}% of every session. <b style={{color:C.gold}}>Silver Queen+</b> badge required.</div>
             </div>
 
@@ -1361,10 +1361,10 @@ function ProfileTab({showToast,setShowUpload,setShowAdmin,setShowSettings,setSho
           <div style={{display:"flex",alignItems:"center",gap:12}}>
             <div style={{fontSize:22}}>🍑</div>
             <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:13,color:C.text}}>Offer Bum Sessions</div>
+              <div style={{fontWeight:700,fontSize:13,color:C.text}}>Offer Live Bum Sessions</div>
               <div style={{fontSize:11,color:C.sub,marginTop:2}}>Allow private 1-on-1 dance requests from your followers</div>
             </div>
-            <div onClick={()=>{setBumOn(!bumOn);showToast(bumOn?"Bum sessions disabled":"Bum sessions enabled! 🍑");}} style={{width:46,height:26,borderRadius:13,background:bumOn?"linear-gradient(135deg,#FFD700,#FF9A76)":C.bgAlt,border:`1px solid ${bumOn?C.gold:C.border}`,cursor:"pointer",position:"relative",transition:"all .3s",flexShrink:0}}>
+            <div onClick={()=>{setBumOn(!bumOn);showToast(bumOn?"Live Bum sessions disabled":"Live Bum sessions enabled! 🍑");}} style={{width:46,height:26,borderRadius:13,background:bumOn?"linear-gradient(135deg,#FFD700,#FF9A76)":C.bgAlt,border:`1px solid ${bumOn?C.gold:C.border}`,cursor:"pointer",position:"relative",transition:"all .3s",flexShrink:0}}>
               <div style={{width:20,height:20,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:bumOn?23:3,transition:"left .3s",boxShadow:"0 2px 6px rgba(0,0,0,0.4)"}}/>
             </div>
           </div>
@@ -1582,7 +1582,7 @@ function BumSessionScreen({session,user,onExtend,onEnd}) {
         <VideoAvatar user={user} size={40} showVideo/>
         <div style={{flex:1}}>
           <div style={{fontWeight:700,fontSize:14,color:C.text}}>{user.name}</div>
-          <div style={{fontSize:11,color:C.gold}}>🍑 Bum Session {session.extensions>0?`· extended ×${session.extensions}`:""}</div>
+          <div style={{fontSize:11,color:C.gold}}>🍑 Live Bum Session {session.extensions>0?`· extended ×${session.extensions}`:""}</div>
         </div>
       </div>
 
@@ -1955,7 +1955,7 @@ function Splash({onDone}) {
   const steps=[
     {sub:"The #1 women's waist dance community",cta:"Get Started"},
     {sub:"Master Afrobeats, Dancehall, Latin & Belly Dance. Post videos, go Live, create ShakyShorts.",cta:"Next →"},
-    {sub:"Request private 🍑 Bum sessions, connect safely, and dance your way to Diamond badge.",cta:"Join the Movement 💃"},
+    {sub:"Request private 🍑 Live Bum sessions, connect safely, and dance your way to Diamond badge.",cta:"Join the Movement 💃"},
   ];
   return (
     <div style={{minHeight:"100vh",background:`radial-gradient(ellipse at top,#2e0a40,${C.bg})`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"space-between",padding:"70px 28px 52px"}}>
@@ -2092,7 +2092,7 @@ function WelcomeScreen({onLogin,onSignup,onGuest}) {
         </div>
         {/* Feature pills */}
         <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center",marginBottom:40}}>
-          {["🌀 Afrobeats","💃 Dancehall","🔥 Latin","✨ Belly Dance","⚡ ShakyShorts","🔴 Live","🍑 Bum Sessions"].map(f=>(
+          {["🌀 Afrobeats","💃 Dancehall","🔥 Latin","✨ Belly Dance","⚡ ShakyShorts","🔴 Live","🍑 Live Bum Sessions"].map(f=>(
             <span key={f} style={{background:`rgba(255,60,172,0.1)`,border:`1px solid ${C.borderH}`,borderRadius:20,padding:"5px 12px",fontSize:11,fontWeight:600,color:C.pink}}>{f}</span>
           ))}
         </div>
@@ -2489,7 +2489,7 @@ function MainApp() {
     setChatUser(null);
   };
 
-  // Single ticking interval for the active Bum session — restarts only when the
+  // Single ticking interval for the active Live Bum session — restarts only when the
   // session identity changes (start/end), not on every second, so extensions just
   // update the shared remainingSec value the interval is already reading.
   useEffect(()=>{
@@ -2571,7 +2571,7 @@ function MainApp() {
         <MomoPaymentModal
           amount={momoTarget.kind==="bum"?bumPriceFor(momoTarget.user,momoTarget.mins):momoTarget.kind==="bum-extend"?bumPriceFor(momoTarget.user,BUM_EXTEND_MIN):priceFor(momoTarget.user)}
           currency="GHS"
-          purposeLabel={momoTarget.kind==="bum"?`Book a ${momoTarget.mins}-min Bum Session with ${momoTarget.user.name}`:momoTarget.kind==="bum-extend"?`Extend session with ${momoTarget.user.name} by ${BUM_EXTEND_MIN} min`:`Unlock ${momoTarget.user.name}'s contact`}
+          purposeLabel={momoTarget.kind==="bum"?`Book a ${momoTarget.mins}-min Live Bum Session with ${momoTarget.user.name}`:momoTarget.kind==="bum-extend"?`Extend session with ${momoTarget.user.name} by ${BUM_EXTEND_MIN} min`:`Unlock ${momoTarget.user.name}'s contact`}
           ownerName={momoTarget.user.name}
           instant={momoTarget.kind==="bum-extend"}
           onClose={()=>setMomoTarget(null)}
