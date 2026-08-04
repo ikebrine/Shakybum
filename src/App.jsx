@@ -1772,25 +1772,67 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
   const [moveTag,setMoveTag]=useState("");
   const [recTime,setRecTime]=useState(0);
   const [prog,setProg]=useState(0);
+  const [camError,setCamError]=useState(null);
   const timerRef=useRef(null);
   const streamRef=useRef(null);
+  const camVideoRef=useRef(null); // live <video> showing the camera feed during cam/recording steps
+  const recorderRef=useRef(null);
+  const chunksRef=useRef([]);
   const maxSec=mode==="profile"||mode==="short"?15:60;
 
   const startCamera=async()=>{
-    setStep("cam");
-    try{const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"},audio:true});streamRef.current=s;}catch(e){}
+    setStep("cam");setCamError(null);
+    try{
+      const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"},audio:true});
+      streamRef.current=s;
+      if(camVideoRef.current)camVideoRef.current.srcObject=s;
+    }catch(e){
+      // No silent failure — permission-denied, no camera, and insecure-context
+      // (getUserMedia requires HTTPS, which is fine on the deployed PWA but
+      // will fail on a plain http:// dev server) all land here.
+      const reason=e?.name==="NotAllowedError"?"Camera permission was denied.":
+                   e?.name==="NotFoundError"?"No camera found on this device.":
+                   "Couldn't access the camera.";
+      setCamError(reason);
+      showToast&&showToast(`🚫 ${reason}`);
+    }
   };
   const startRec=()=>{
+    if(!streamRef.current)return;
+    chunksRef.current=[];
+    let recorder;
+    try{
+      recorder=new MediaRecorder(streamRef.current,{mimeType:MediaRecorder.isTypeSupported("video/webm")?"video/webm":undefined});
+    }catch(e){
+      showToast&&showToast("🚫 Recording isn't supported in this browser.");
+      return;
+    }
+    recorder.ondataavailable=e=>{if(e.data.size>0)chunksRef.current.push(e.data);};
+    recorder.onstop=()=>{
+      const blob=new Blob(chunksRef.current,{type:"video/webm"});
+      setVideoURL(prev=>{if(prev&&prev.startsWith("blob:"))URL.revokeObjectURL(prev);return URL.createObjectURL(blob);});
+      setStep("preview");
+    };
+    recorderRef.current=recorder;
+    recorder.start();
     setRecTime(0);setStep("recording");
     timerRef.current=setInterval(()=>{setRecTime(p=>{if(p+1>=maxSec){stopRec();return p+1;}return p+1;});},1000);
-    setTimeout(()=>{setVideoURL("demo");setStep("preview");},500);
   };
-  const stopRec=()=>{clearInterval(timerRef.current);setVideoURL("demo");setStep("preview");streamRef.current?.getTracks().forEach(t=>t.stop());};
+  const stopRec=()=>{
+    clearInterval(timerRef.current);
+    if(recorderRef.current&&recorderRef.current.state!=="inactive")recorderRef.current.stop();
+    streamRef.current?.getTracks().forEach(t=>t.stop());
+  };
   const selectFile=e=>{
     const f=e.target.files?.[0];
     if(!f)return;
     if(!f.type.startsWith("video/")){showToast("🚫 Videos only! No photos on Shakybum.");return;}
-    setVideoURL(URL.createObjectURL(f));setStep("preview");
+    setVideoURL(prev=>{if(prev&&prev.startsWith("blob:"))URL.revokeObjectURL(prev);return URL.createObjectURL(f);});
+    setStep("preview");
+  };
+  const retake=()=>{
+    setVideoURL(prev=>{if(prev&&prev.startsWith("blob:"))URL.revokeObjectURL(prev);return null;});
+    setStep("choose");
   };
   const doUpload=()=>{
     if(mode!=="profile"&&mode!=="short"&&!moveTag){showToast("Tag a move first! 💃");return;}
@@ -1799,7 +1841,11 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
     setStep("uploading");setProg(0);
     const iv=setInterval(()=>{setProg(p=>{const n=Math.min(100,p+Math.random()*14+5);if(n>=100){clearInterval(iv);setStep("done");}return n;});},180);
   };
-  useEffect(()=>()=>{clearInterval(timerRef.current);streamRef.current?.getTracks().forEach(t=>t.stop());},[]);
+  useEffect(()=>()=>{
+    clearInterval(timerRef.current);
+    streamRef.current?.getTracks().forEach(t=>t.stop());
+    if(videoURL&&videoURL.startsWith("blob:"))URL.revokeObjectURL(videoURL);
+  },[]);
   const pct=Math.min(100,Math.round((recTime/maxSec)*100));
   const title={post:"Post a Dance Video",profile:"Profile Video (15s)",short:"New ShakyShort (15s)"}[mode]||"Upload Video";
   const doneMsg={post:"Video posted! The community can like and comment 🔥",profile:"Profile video set! Your animated avatar is live 💃",short:"ShakyShort posted! It'll appear in the Shorts feed ⚡"}[mode]||"Done!";
@@ -1836,8 +1882,16 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
       )}
       {(step==="cam"||step==="recording")&&(
         <div style={{flex:1,display:"flex",flexDirection:"column",position:"relative"}}>
-          <div style={{flex:1,background:"linear-gradient(135deg,#1a0d2e,#0e0718)",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
-            <div style={{textAlign:"center"}}><div style={{fontSize:64}}>💃</div><div style={{fontSize:13,color:C.sub,marginTop:8}}>Camera preview</div></div>
+          <div style={{flex:1,background:"#000",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
+            {camError?(
+              <div style={{textAlign:"center",padding:"0 32px"}}>
+                <div style={{fontSize:44,marginBottom:10}}>🚫</div>
+                <div style={{fontSize:14,color:C.text,fontWeight:700,marginBottom:6}}>{camError}</div>
+                <div style={{fontSize:12,color:C.sub,lineHeight:1.6}}>Check your browser's site permissions and try again, or upload a video from your device instead.</div>
+              </div>
+            ):(
+              <video ref={camVideoRef} autoPlay muted playsInline style={{width:"100%",height:"100%",objectFit:"cover",transform:"scaleX(-1)"}}/>
+            )}
             {step==="recording"&&<>
               <div style={{position:"absolute",top:14,left:"50%",transform:"translateX(-50%)",background:"rgba(255,59,92,0.92)",borderRadius:20,padding:"5px 16px",display:"flex",alignItems:"center",gap:8}}>
                 <span className="live-flash" style={{color:"#fff",fontSize:10}}>●</span>
@@ -1850,7 +1904,7 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
           </div>
           <div style={{padding:"20px 24px 36px",background:C.bg,display:"flex",justifyContent:"center",alignItems:"center",gap:28}}>
             <button onClick={()=>{setStep("choose");streamRef.current?.getTracks().forEach(t=>t.stop());}} style={{width:46,height:46,borderRadius:"50%",background:C.bgCard,border:`1px solid ${C.border}`,cursor:"pointer",fontSize:18,color:C.sub}}>✕</button>
-            {step==="cam"?<button onClick={startRec} className="rec-pulse" style={{width:74,height:74,borderRadius:"50%",background:"linear-gradient(135deg,#FF3B5C,#FF6B6B)",border:"4px solid rgba(255,59,92,0.35)",cursor:"pointer",fontSize:30}}>●</button>
+            {step==="cam"?<button onClick={startRec} disabled={!!camError} className="rec-pulse" style={{width:74,height:74,borderRadius:"50%",background:camError?C.bgCard:"linear-gradient(135deg,#FF3B5C,#FF6B6B)",border:"4px solid rgba(255,59,92,0.35)",cursor:camError?"default":"pointer",fontSize:30,opacity:camError?0.4:1}}>●</button>
             :<button onClick={stopRec} className="rec-pulse" style={{width:74,height:74,borderRadius:20,background:"#FF3B5C",border:"4px solid rgba(255,59,92,0.4)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{width:28,height:28,borderRadius:5,background:"#fff"}}/></button>}
             <div style={{width:46,height:46}}/>
           </div>
@@ -1858,10 +1912,14 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
       )}
       {step==="preview"&&(
         <div style={{flex:1,display:"flex",flexDirection:"column",padding:"0 20px"}}>
-          <div style={{flex:1,borderRadius:20,overflow:"hidden",background:"linear-gradient(135deg,#1a0d2e,#0e0718)",marginBottom:14,position:"relative",minHeight:240,display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <div style={{textAlign:"center"}}><div style={{fontSize:64}}>💃</div><div style={{fontSize:13,color:C.sub}}>Video ready</div></div>
+          <div style={{flex:1,borderRadius:20,overflow:"hidden",background:"#000",marginBottom:14,position:"relative",minHeight:240,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            {videoURL?(
+              <video src={videoURL} controls playsInline loop style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+            ):(
+              <div style={{textAlign:"center"}}><div style={{fontSize:64}}>💃</div><div style={{fontSize:13,color:C.sub}}>Video ready</div></div>
+            )}
             <VideoWatermark/>
-            <button onClick={()=>setStep("choose")} style={{position:"absolute",top:12,right:12,background:"rgba(0,0,0,0.7)",backdropFilter:"blur(8px)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:10,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer"}}>🔄 Retake</button>
+            <button onClick={retake} style={{position:"absolute",top:12,right:12,background:"rgba(0,0,0,0.7)",backdropFilter:"blur(8px)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:10,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer"}}>🔄 Retake</button>
           </div>
           {mode==="post"&&<>
             <input value={caption} onChange={e=>setCaption(e.target.value)} placeholder="Describe your move... 💃" style={{width:"100%",background:C.bgCard,border:`1px solid ${scanContactInfo(caption).flagged?"rgba(255,59,92,0.6)":C.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,color:C.text,outline:"none",marginBottom:scanContactInfo(caption).flagged?4:10}}/>
@@ -1911,9 +1969,31 @@ function LiveModal({onClose,showToast}) {
   const [elapsed,setElapsed]=useState(0);
   const commRef=useRef(null);
   const vT=useRef(null),cT=useRef(null),eT=useRef(null);
+  const streamRef=useRef(null);
+  const liveVideoRef=useRef(null); // shows YOUR OWN camera feed — going out to viewers isn't real (no streaming server), but you seeing yourself is
   const BOT=[{user:"salsaqueen",text:"Teaching me through the screen 💃",color:"#FF9A76"},{user:"nanagold",text:"Come to Accra!! 🇬🇭🔥",color:"#4CC9F0"},{user:"islandvibe",text:"Caribbean vibes!! 🌴",color:"#F72585"},{user:"afrogyal",text:"This is EVERYTHING 🍑",color:"#7FFF00"},{user:"shakyfan1",text:"Practicing right now 😂",color:"#FFD700"}];
-  const startLive=()=>{if(!title.trim()){showToast("Add a live title first! 📹");return;}setState("live");setViewers(4);let i=0;vT.current=setInterval(()=>setViewers(p=>p+Math.floor(Math.random()*4+1)),3500);cT.current=setInterval(()=>{const c=BOT[i%BOT.length];setComments(p=>[...p.slice(-25),{id:Date.now(),user:c.user,text:c.text,color:c.color}]);i++;},2200);eT.current=setInterval(()=>setElapsed(p=>p+1),1000);};
-  const endLive=()=>{[vT,cT,eT].forEach(r=>clearInterval(r.current));setState("ended");};
+  const startLive=async()=>{
+    if(!title.trim()){showToast("Add a live title first! 📹");return;}
+    try{
+      const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"},audio:true});
+      streamRef.current=s;
+    }catch(e){
+      // Camera is required to go live for real — no silent fallback to a
+      // fake feed, since that would misrepresent what viewers would actually see.
+      const reason=e?.name==="NotAllowedError"?"Camera permission was denied.":e?.name==="NotFoundError"?"No camera found on this device.":"Couldn't access the camera.";
+      showToast&&showToast(`🚫 ${reason} Can't go live without it.`);
+      return;
+    }
+    setState("live");setViewers(4);let i=0;
+    vT.current=setInterval(()=>setViewers(p=>p+Math.floor(Math.random()*4+1)),3500);
+    cT.current=setInterval(()=>{const c=BOT[i%BOT.length];setComments(p=>[...p.slice(-25),{id:Date.now(),user:c.user,text:c.text,color:c.color}]);i++;},2200);
+    eT.current=setInterval(()=>setElapsed(p=>p+1),1000);
+  };
+  const endLive=()=>{
+    [vT,cT,eT].forEach(r=>clearInterval(r.current));
+    streamRef.current?.getTracks().forEach(t=>t.stop());
+    setState("ended");
+  };
   const sendComment=()=>{
     if(!cInput.trim())return;
     const flag=scanContactInfo(cInput);
@@ -1921,7 +2001,8 @@ function LiveModal({onClose,showToast}) {
     setComments(p=>[...p.slice(-25),{id:Date.now(),user:"you",text:cInput.trim(),color:C.pink}]);setCInput("");
   };
   useEffect(()=>{if(commRef.current)commRef.current.scrollTop=commRef.current.scrollHeight;},[comments]);
-  useEffect(()=>()=>{[vT,cT,eT].forEach(r=>clearInterval(r.current));},[]);
+  useEffect(()=>{if(state==="live"&&liveVideoRef.current&&streamRef.current)liveVideoRef.current.srcObject=streamRef.current;},[state]);
+  useEffect(()=>()=>{[vT,cT,eT].forEach(r=>clearInterval(r.current));streamRef.current?.getTracks().forEach(t=>t.stop());},[]);
   const fmt=s=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
 
   return (
@@ -1946,8 +2027,8 @@ function LiveModal({onClose,showToast}) {
       )}
       {state==="live"&&(
         <div style={{flex:1,display:"flex",flexDirection:"column",position:"relative"}}>
-          <div style={{flex:1,background:"linear-gradient(135deg,#1a0d2e,#0e0718)",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
-            <div style={{textAlign:"center"}}><div style={{fontSize:80,animation:"wiggle 2.5s ease-in-out infinite"}}>💃</div></div>
+          <div style={{flex:1,background:"#000",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
+            <video ref={liveVideoRef} autoPlay muted playsInline style={{width:"100%",height:"100%",objectFit:"cover",transform:"scaleX(-1)"}}/>
             <VideoWatermark/>
             <div style={{position:"absolute",top:0,left:0,right:0,padding:"14px",display:"flex",alignItems:"center",gap:8,background:"linear-gradient(to bottom,rgba(0,0,0,0.75),transparent)"}}>
               <div style={{display:"flex",alignItems:"center",gap:4,background:"rgba(255,59,92,0.9)",borderRadius:10,padding:"5px 10px"}}><span className="live-flash" style={{color:"#fff",fontSize:10}}>●</span><span style={{fontWeight:800,color:"#fff",fontSize:11}}>LIVE</span></div>
@@ -1955,6 +2036,9 @@ function LiveModal({onClose,showToast}) {
               <div style={{background:"rgba(0,0,0,0.5)",borderRadius:10,padding:"5px 10px",fontSize:11,color:"#fff"}}>⏱ {fmt(elapsed)}</div>
               <div style={{flex:1,fontSize:12,color:"rgba(255,255,255,0.8)",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
               <button onClick={endLive} style={{background:"rgba(255,59,92,0.85)",border:"none",borderRadius:10,padding:"5px 12px",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}}>End</button>
+            </div>
+            <div style={{position:"absolute",bottom:74,left:14,right:14,background:"rgba(0,0,0,0.55)",backdropFilter:"blur(6px)",borderRadius:10,padding:"7px 10px",fontSize:10.5,color:"rgba(255,255,255,0.75)",lineHeight:1.4}}>
+              📹 You're seeing your own camera — the viewer count and comments above are simulated for this preview build, not a real broadcast yet.
             </div>
             <div style={{position:"absolute",right:14,bottom:60,display:"flex",flexDirection:"column",gap:5}}>
               {["❤️","🔥","💃","🍑"].map((e,i)=><div key={i} style={{fontSize:20,animation:`floatY ${1.4+i*.3}s ease-in-out infinite`,animationDelay:`${i*.4}s`}}>{e}</div>)}
