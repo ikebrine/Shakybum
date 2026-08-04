@@ -5,12 +5,9 @@ rewrite of `backend/` (the Express/Node version) to run as a Supabase Edge
 Function, so the whole app fits on Vercel (frontend) + Supabase (database
 + API) with no third hosting service.
 
-> **This has been verified end-to-end against a real, live Postgres and a
-> mock Paystack server** — not just type-checked. See "What was actually
-> verified" below for the exact list. This is a stronger verification
-> level than the earlier `backend/` Postgres migration got, because Deno
-> (unlike a local Postgres server at the time) turned out to be installable
-> in the environment that built this.
+**Automated test suite: 24/24 passing** against a real local Postgres 16
+instance — run `deno task test` (see "Running tests" below). This is on
+top of the manual end-to-end verification described further down.
 
 ## Why this exists / how it differs from `backend/`
 
@@ -51,7 +48,51 @@ Tables auto-create on cold start (`migrate()` runs the same
 `CREATE TABLE IF NOT EXISTS` schema as the Node version — safe to
 re-run every cold start).
 
-## Local development
+## Running tests
+
+```bash
+cd supabase/functions/api
+export TEST_DATABASE_URL="postgresql://postgres:password@localhost:5432/shakybum_test"
+deno task test
+```
+
+**Requires a real, reachable Postgres** — same trade-off as the Node
+backend's test suite (a disposable SQLite file isn't an option here since
+there's no SQLite version of this backend). Cheapest options: a local
+Postgres (`docker run -e POSTGRES_PASSWORD=x -p 5432:5432 postgres:16`),
+a second free Supabase project used only for tests, or Neon/Railway's
+free-tier Postgres.
+
+24 tests across 4 files:
+- **`badges.unit.test.ts`** (3 tests) — pure unit tests for badge
+  threshold logic, no server/DB needed.
+- **`escrow.test.ts`** (9 tests) — the core payment state machine: full
+  contact-request approve/decline cycle, authorization edge cases, chat
+  gating, and the complete Bum session lifecycle including the paid
+  extension.
+- **`social.test.ts`** (7 tests) — posts/likes/comments/follows,
+  contact-info filtering, badge auto-recomputation (including
+  auto-disabling Bum sessions when a badge drops).
+- **`webhooks.test.ts`** (5 tests) — signature verification, idempotency,
+  and the `transfer.failed`/`refund.processed` async paths the happy-path
+  tests don't reach.
+
+**How test isolation works without subprocess juggling**: the app and a
+Deno-native mock Paystack server (`__tests__/helpers/mockPaystackApp.ts`)
+both run as `Deno.serve()` listeners on ephemeral ports *within the same
+test process* — not as separate OS processes. `deno test` manages the
+whole lifecycle, so there's no backgrounding, no `setsid`, none of the
+process-management issues documented further down for manual testing.
+Each test file gets its own Postgres schema (created before import,
+dropped on teardown) so parallel test files can't corrupt each other's data.
+
+## Testing manually (without the automated suite)
+
+For exploratory testing against a real running instance — as opposed to
+the in-process automated suite above — the same manual approach from
+earlier in this project still works, with the caveats in "Getting this
+running in this dev sandbox" below (background processes need `setsid` +
+`< /dev/null` to survive reliably here).
 
 Requires [Deno](https://deno.com) and a local (or remote) Postgres:
 
@@ -75,9 +116,10 @@ it's just an HTTP server, doesn't care what's calling it. Set
 
 ## What was actually verified (live, not just type-checked)
 
-Every one of the 25 source files passes `deno check` with zero errors.
-Beyond that, this was run for real against a live local Postgres 16
-instance and the mock Paystack server, covering:
+Every source and test file passes `deno check` with zero errors.
+Beyond the automated suite above, this was also run manually for real
+against a live local Postgres 16 instance and the mock Paystack server,
+covering:
 
 - **Signup/login** — real bcrypt hashing, real JWT issuance, confirmed
   the exact response shape.

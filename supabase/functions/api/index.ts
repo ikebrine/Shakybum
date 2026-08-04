@@ -64,4 +64,12 @@ app.onError((err, c) => {
   return c.json({ error: "Internal server error" }, 500);
 });
 
-Deno.serve(app.fetch);
+// Only start listening when run directly (`deno run index.ts`), not when
+// imported by the test suite — Hono's app.request() tests the app
+// in-memory without needing a real network listener at all, which sidesteps
+// the process/networking issues that come with spinning up real servers.
+if (import.meta.main) {
+  Deno.serve(app.fetch);
+}
+
+export default app;

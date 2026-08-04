@@ -2,5 +2,9 @@
   "nodeModulesDir": "none",
   "compilerOptions": {
     "lib": ["deno.window"]
+  },
+  "tasks": {
+    "test": "deno test --allow-net --allow-env --allow-read __tests__/",
+    "dev": "deno run --allow-net --allow-env --allow-read --watch index.ts"
   }
 }

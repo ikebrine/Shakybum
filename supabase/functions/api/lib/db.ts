@@ -25,6 +25,11 @@ export const pool = new Pool({
   // cap the pool small so we're not holding onto idle connections a cold
   // instance never gets to release cleanly.
   max: 5,
+  // Test isolation: each test file runs in its own Postgres schema so
+  // `deno test`'s parallel test execution can't have two files stomp on
+  // each other's data — see __tests__/helpers/testEnv.ts. Production/dev
+  // leave this unset and use the default "public" schema.
+  options: Deno.env.get("PG_SEARCH_PATH") ? `-c search_path=${Deno.env.get("PG_SEARCH_PATH")}` : undefined,
 });
 
 export const db = {
