@@ -8,28 +8,31 @@ function toExtension(row) {
     id: row.id,
     bumSessionId: row.bum_session_id,
     mins: row.mins,
-    amount: row.amount,
+    amount: Number(row.amount),
     paystackReference: row.paystack_reference,
     status: row.status,
     createdAt: row.created_at,
   };
 }
 export const bumExtensionsRepo = {
-  create({ bumSessionId, mins, amount, paystackReference }) {
+  async create({ bumSessionId, mins, amount, paystackReference }) {
     const id = newId("bumext");
-    db.prepare(
-      `INSERT INTO bum_extensions (id, bum_session_id, mins, amount, paystack_reference) VALUES (?, ?, ?, ?, ?)`
-    ).run(id, bumSessionId, mins, amount, paystackReference);
+    await db.query(
+      `INSERT INTO bum_extensions (id, bum_session_id, mins, amount, paystack_reference) VALUES ($1, $2, $3, $4, $5)`,
+      [id, bumSessionId, mins, amount, paystackReference]
+    );
     return this.findById(id);
   },
-  findById(id) {
-    return toExtension(db.prepare(`SELECT * FROM bum_extensions WHERE id = ?`).get(id));
+  async findById(id) {
+    const { rows } = await db.query(`SELECT * FROM bum_extensions WHERE id = $1`, [id]);
+    return toExtension(rows[0]);
   },
-  findByReference(ref) {
-    return toExtension(db.prepare(`SELECT * FROM bum_extensions WHERE paystack_reference = ?`).get(ref));
+  async findByReference(ref) {
+    const { rows } = await db.query(`SELECT * FROM bum_extensions WHERE paystack_reference = $1`, [ref]);
+    return toExtension(rows[0]);
   },
-  setStatus(id, status) {
-    db.prepare(`UPDATE bum_extensions SET status = ? WHERE id = ?`).run(status, id);
+  async setStatus(id, status) {
+    await db.query(`UPDATE bum_extensions SET status = $1 WHERE id = $2`, [status, id]);
     return this.findById(id);
   },
 };
@@ -45,15 +48,22 @@ function toMessage(row) {
   return { id: row.id, senderId: row.sender_id, chatKey: row.chat_key, text: row.text, createdAt: row.created_at };
 }
 export const messagesRepo = {
-  create({ senderId, otherUserId, text }) {
+  async create({ senderId, otherUserId, text }) {
     const id = newId("msg");
     const chatKey = chatKeyFor(senderId, otherUserId);
-    db.prepare(`INSERT INTO messages (id, sender_id, chat_key, text) VALUES (?, ?, ?, ?)`).run(id, senderId, chatKey, text);
-    return toMessage(db.prepare(`SELECT * FROM messages WHERE id = ?`).get(id));
+    const { rows } = await db.query(
+      `INSERT INTO messages (id, sender_id, chat_key, text) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [id, senderId, chatKey, text]
+    );
+    return toMessage(rows[0]);
   },
-  listBetween(userA, userB, { limit = 100 } = {}) {
+  async listBetween(userA, userB, { limit = 100 } = {}) {
     const chatKey = chatKeyFor(userA, userB);
-    return db.prepare(`SELECT * FROM messages WHERE chat_key = ? ORDER BY created_at ASC LIMIT ?`).all(chatKey, limit).map(toMessage);
+    const { rows } = await db.query(
+      `SELECT * FROM messages WHERE chat_key = $1 ORDER BY created_at ASC LIMIT $2`,
+      [chatKey, limit]
+    );
+    return rows.map(toMessage);
   },
 };
 
@@ -63,16 +73,23 @@ function toNotif(row) {
   return { id: row.id, userId: row.user_id, type: row.type, text: row.text, read: !!row.read, createdAt: row.created_at };
 }
 export const notificationsRepo = {
-  create({ userId, type, text }) {
+  async create({ userId, type, text }) {
     const id = newId("notif");
-    db.prepare(`INSERT INTO notifications (id, user_id, type, text) VALUES (?, ?, ?, ?)`).run(id, userId, type, text);
-    return toNotif(db.prepare(`SELECT * FROM notifications WHERE id = ?`).get(id));
+    const { rows } = await db.query(
+      `INSERT INTO notifications (id, user_id, type, text) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [id, userId, type, text]
+    );
+    return toNotif(rows[0]);
   },
-  listFor(userId, { limit = 50 } = {}) {
-    return db.prepare(`SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`).all(userId, limit).map(toNotif);
+  async listFor(userId, { limit = 50 } = {}) {
+    const { rows } = await db.query(
+      `SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [userId, limit]
+    );
+    return rows.map(toNotif);
   },
-  markRead(id, userId) {
-    db.prepare(`UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?`).run(id, userId);
+  async markRead(id, userId) {
+    await db.query(`UPDATE notifications SET read = true WHERE id = $1 AND user_id = $2`, [id, userId]);
   },
 };
 
@@ -84,9 +101,9 @@ function toPayment(row) {
     userId: row.user_id,
     kind: row.kind,
     refId: row.ref_id,
-    amount: row.amount,
-    platformCut: row.platform_cut,
-    creatorCut: row.creator_cut,
+    amount: Number(row.amount),
+    platformCut: Number(row.platform_cut),
+    creatorCut: Number(row.creator_cut),
     status: row.status,
     paystackReference: row.paystack_reference,
     payoutReference: row.payout_reference,
@@ -96,35 +113,46 @@ function toPayment(row) {
   };
 }
 export const paymentsRepo = {
-  create({ userId, kind, refId, amount, platformCut, creatorCut, paystackReference }) {
+  async create({ userId, kind, refId, amount, platformCut, creatorCut, paystackReference }) {
     const id = newId("pay");
-    db.prepare(
-      `INSERT INTO payments (id, user_id, kind, ref_id, amount, platform_cut, creator_cut, paystack_reference) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, userId, kind, refId, amount, platformCut, creatorCut, paystackReference);
+    const { rows } = await db.query(
+      `INSERT INTO payments (id, user_id, kind, ref_id, amount, platform_cut, creator_cut, paystack_reference) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [id, userId, kind, refId, amount, platformCut, creatorCut, paystackReference]
+    );
+    return toPayment(rows[0]);
+  },
+  async findById(id) {
+    const { rows } = await db.query(`SELECT * FROM payments WHERE id = $1`, [id]);
+    return toPayment(rows[0]);
+  },
+  async findByReference(ref) {
+    const { rows } = await db.query(`SELECT * FROM payments WHERE paystack_reference = $1`, [ref]);
+    return toPayment(rows[0]);
+  },
+  async setStatus(id, status) {
+    await db.query(`UPDATE payments SET status = $1, updated_at = now() WHERE id = $2`, [status, id]);
     return this.findById(id);
   },
-  findById(id) {
-    return toPayment(db.prepare(`SELECT * FROM payments WHERE id = ?`).get(id));
-  },
-  findByReference(ref) {
-    return toPayment(db.prepare(`SELECT * FROM payments WHERE paystack_reference = ?`).get(ref));
-  },
-  setStatus(id, status) {
-    db.prepare(`UPDATE payments SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, id);
+  async setPayoutReference(id, payoutReference) {
+    await db.query(
+      `UPDATE payments SET payout_reference = $1, status = 'processing_payout', updated_at = now() WHERE id = $2`,
+      [payoutReference, id]
+    );
     return this.findById(id);
   },
-  setPayoutReference(id, payoutReference) {
-    db.prepare(`UPDATE payments SET payout_reference = ?, status = 'processing_payout', updated_at = datetime('now') WHERE id = ?`).run(payoutReference, id);
+  async setRefundReference(id, refundReference) {
+    await db.query(
+      `UPDATE payments SET refund_reference = $1, status = 'processing_refund', updated_at = now() WHERE id = $2`,
+      [refundReference, id]
+    );
     return this.findById(id);
   },
-  setRefundReference(id, refundReference) {
-    db.prepare(`UPDATE payments SET refund_reference = ?, status = 'processing_refund', updated_at = datetime('now') WHERE id = ?`).run(refundReference, id);
-    return this.findById(id);
+  async findByPayoutReference(ref) {
+    const { rows } = await db.query(`SELECT * FROM payments WHERE payout_reference = $1`, [ref]);
+    return toPayment(rows[0]);
   },
-  findByPayoutReference(ref) {
-    return toPayment(db.prepare(`SELECT * FROM payments WHERE payout_reference = ?`).get(ref));
-  },
-  ledgerFor(userId) {
-    return db.prepare(`SELECT * FROM payments WHERE user_id = ? ORDER BY created_at DESC`).all(userId).map(toPayment);
+  async ledgerFor(userId) {
+    const { rows } = await db.query(`SELECT * FROM payments WHERE user_id = $1 ORDER BY created_at DESC`, [userId]);
+    return rows.map(toPayment);
   },
 };

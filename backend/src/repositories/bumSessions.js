@@ -8,7 +8,7 @@ function toRow(row) {
     payerId: row.payer_id,
     creatorId: row.creator_id,
     mins: row.mins,
-    amount: row.amount,
+    amount: Number(row.amount),
     status: row.status,
     paystackReference: row.paystack_reference,
     totalSec: row.total_sec,
@@ -21,46 +21,57 @@ function toRow(row) {
 }
 
 export const bumSessionsRepo = {
-  create({ payerId, creatorId, mins, amount, paystackReference }) {
+  async create({ payerId, creatorId, mins, amount, paystackReference }) {
     const id = newId("bum");
-    db.prepare(
-      `INSERT INTO bum_sessions (id, payer_id, creator_id, mins, amount, paystack_reference, total_sec) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, payerId, creatorId, mins, amount, paystackReference, mins * 60);
+    await db.query(
+      `INSERT INTO bum_sessions (id, payer_id, creator_id, mins, amount, paystack_reference, total_sec) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, payerId, creatorId, mins, amount, paystackReference, mins * 60]
+    );
     return this.findById(id);
   },
-  findById(id) {
-    return toRow(db.prepare(`SELECT * FROM bum_sessions WHERE id = ?`).get(id));
+  async findById(id) {
+    const { rows } = await db.query(`SELECT * FROM bum_sessions WHERE id = $1`, [id]);
+    return toRow(rows[0]);
   },
-  findByReference(ref) {
-    return toRow(db.prepare(`SELECT * FROM bum_sessions WHERE paystack_reference = ?`).get(ref));
+  async findByReference(ref) {
+    const { rows } = await db.query(`SELECT * FROM bum_sessions WHERE paystack_reference = $1`, [ref]);
+    return toRow(rows[0]);
   },
-  setStatus(id, status) {
-    db.prepare(`UPDATE bum_sessions SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, id);
+  async setStatus(id, status) {
+    await db.query(`UPDATE bum_sessions SET status = $1, updated_at = now() WHERE id = $2`, [status, id]);
     return this.findById(id);
   },
-  start(id) {
-    db.prepare(`UPDATE bum_sessions SET status = 'active', started_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`).run(id);
+  async start(id) {
+    await db.query(`UPDATE bum_sessions SET status = 'active', started_at = now(), updated_at = now() WHERE id = $1`, [id]);
     return this.findById(id);
   },
-  extend(id, extraSec) {
-    db.prepare(
-      `UPDATE bum_sessions SET total_sec = total_sec + ?, extensions = extensions + 1, updated_at = datetime('now') WHERE id = ?`
-    ).run(extraSec, id);
+  async extend(id, extraSec) {
+    await db.query(
+      `UPDATE bum_sessions SET total_sec = total_sec + $1, extensions = extensions + 1, updated_at = now() WHERE id = $2`,
+      [extraSec, id]
+    );
     return this.findById(id);
   },
-  end(id) {
-    db.prepare(`UPDATE bum_sessions SET status = 'completed', ended_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`).run(id);
+  async end(id) {
+    await db.query(`UPDATE bum_sessions SET status = 'completed', ended_at = now(), updated_at = now() WHERE id = $1`, [id]);
     return this.findById(id);
   },
-  receivedFor(creatorId, status = "paid_hold") {
-    return db.prepare(`SELECT * FROM bum_sessions WHERE creator_id = ? AND status = ? ORDER BY created_at DESC`).all(creatorId, status).map(toRow);
+  async receivedFor(creatorId, status = "paid_hold") {
+    const { rows } = await db.query(
+      `SELECT * FROM bum_sessions WHERE creator_id = $1 AND status = $2 ORDER BY created_at DESC`,
+      [creatorId, status]
+    );
+    return rows.map(toRow);
   },
-  sentBy(payerId) {
-    return db.prepare(`SELECT * FROM bum_sessions WHERE payer_id = ? ORDER BY created_at DESC`).all(payerId).map(toRow);
+  async sentBy(payerId) {
+    const { rows } = await db.query(`SELECT * FROM bum_sessions WHERE payer_id = $1 ORDER BY created_at DESC`, [payerId]);
+    return rows.map(toRow);
   },
-  activeOrApprovedFor(userId) {
-    return db.prepare(
-      `SELECT * FROM bum_sessions WHERE (payer_id = ? OR creator_id = ?) AND status IN ('approved','active') ORDER BY created_at DESC`
-    ).all(userId, userId).map(toRow);
+  async activeOrApprovedFor(userId) {
+    const { rows } = await db.query(
+      `SELECT * FROM bum_sessions WHERE (payer_id = $1 OR creator_id = $1) AND status IN ('approved','active') ORDER BY created_at DESC`,
+      [userId]
+    );
+    return rows.map(toRow);
   },
 };

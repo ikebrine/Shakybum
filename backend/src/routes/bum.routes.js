@@ -21,7 +21,7 @@ router.post("/", requireAuth, asyncHandler(async (req, res) => {
   if (!MOMO_PROVIDERS[provider]) {
     return res.status(400).json({ error: `provider must be one of: ${Object.keys(MOMO_PROVIDERS).join(", ")}` });
   }
-  const creator = usersRepo.findByHandle(creatorHandle);
+  const creator = await usersRepo.findByHandle(creatorHandle);
   if (!creator) return res.status(404).json({ error: "Creator not found" });
   if (!BUM_OK_BADGES.includes(creator.badge) || !creator.bumEnabled) {
     return res.status(400).json({ error: "This creator isn't offering Live Bum sessions" });
@@ -33,24 +33,26 @@ router.post("/", requireAuth, asyncHandler(async (req, res) => {
   res.status(201).json({ bumSession, charge: { reference: charge.data?.reference, display_text: charge.data?.display_text } });
 }));
 
-router.get("/sent", requireAuth, (req, res) => {
-  res.json({ sessions: bumSessionsRepo.sentBy(req.user.id).map(withRemainingSec) });
-});
+router.get("/sent", requireAuth, asyncHandler(async (req, res) => {
+  const sessions = await bumSessionsRepo.sentBy(req.user.id);
+  res.json({ sessions: sessions.map(withRemainingSec) });
+}));
 
-router.get("/received", requireAuth, (req, res) => {
-  res.json({ sessions: bumSessionsRepo.receivedFor(req.user.id, "paid_hold") });
-});
+router.get("/received", requireAuth, asyncHandler(async (req, res) => {
+  res.json({ sessions: await bumSessionsRepo.receivedFor(req.user.id, "paid_hold") });
+}));
 
-router.get("/active", requireAuth, (req, res) => {
-  res.json({ sessions: bumSessionsRepo.activeOrApprovedFor(req.user.id).map(withRemainingSec) });
-});
+router.get("/active", requireAuth, asyncHandler(async (req, res) => {
+  const sessions = await bumSessionsRepo.activeOrApprovedFor(req.user.id);
+  res.json({ sessions: sessions.map(withRemainingSec) });
+}));
 
-router.get("/:id", requireAuth, (req, res) => {
-  const bs = bumSessionsRepo.findById(req.params.id);
+router.get("/:id", requireAuth, asyncHandler(async (req, res) => {
+  const bs = await bumSessionsRepo.findById(req.params.id);
   if (!bs) return res.status(404).json({ error: "Not found" });
   if (![bs.payerId, bs.creatorId].includes(req.user.id)) return res.status(403).json({ error: "Not a participant" });
   res.json({ bumSession: withRemainingSec(bs) });
-});
+}));
 
 router.post("/:id/approve", requireAuth, asyncHandler(async (req, res) => {
   const updated = await approveBumSession({ bumSessionId: req.params.id, actingUser: req.user });
@@ -73,7 +75,7 @@ router.post("/:id/end", requireAuth, asyncHandler(async (req, res) => {
 }));
 
 router.post("/:id/extend", requireAuth, asyncHandler(async (req, res) => {
-  const bs = bumSessionsRepo.findById(req.params.id);
+  const bs = await bumSessionsRepo.findById(req.params.id);
   if (!bs) return res.status(404).json({ error: "Not found" });
   if (![bs.payerId, bs.creatorId].includes(req.user.id)) return res.status(403).json({ error: "Not a participant" });
 

@@ -1,22 +1,49 @@
 import crypto from "crypto";
-import fs from "fs";
-import os from "os";
-import path from "path";
+import pg from "pg";
 import { createMockPaystackApp } from "../../lib/mockPaystackApp.js";
 
 /**
- * Sets up an isolated backend + mock-Paystack pair for one test file:
- * fresh SQLite file, real JWT secret, ephemeral ports for both servers,
- * wired to each other. Call this once per test file (each `node --test`
- * file runs in its own process, so there's no cross-file collision).
+ * Sets up an isolated backend + mock-Paystack pair for one test file.
+ *
+ * REQUIRES a real, reachable Postgres — set TEST_DATABASE_URL (falls back
+ * to DATABASE_URL) before running `npm test`. This is a genuine change
+ * from the pre-Postgres-migration version of this suite, which used a
+ * throwaway SQLite file and needed no external services; that's the
+ * trade-off of moving off SQLite (see backend/README.md).
+ *
+ * Isolation: each test file gets its own Postgres SCHEMA (not a separate
+ * database — works fine on Supabase's single-database-per-project setup),
+ * created before the app imports run and dropped on teardown. This matters
+ * because `node --test` runs test files in parallel by default; without
+ * per-file schemas, two files sharing one set of tables would corrupt each
+ * other's state mid-run.
  *
  * Must be called and awaited BEFORE importing anything from src/server.js
  * or src/lib/paystack.js in the calling test file, since those read
  * process.env at import/call time.
  */
 export async function setupTestEnv({ autoSucceed = true, delayMs = 30 } = {}) {
-  const dbPath = path.join(os.tmpdir(), `shakybum-test-${crypto.randomBytes(6).toString("hex")}.db`);
-  process.env.DATABASE_PATH = dbPath;
+  const baseConnectionString = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+  if (!baseConnectionString) {
+    throw new Error(
+      "TEST_DATABASE_URL (or DATABASE_URL) must point at a real Postgres instance to run tests — " +
+      "see backend/README.md 'Running tests' for setup."
+    );
+  }
+
+  const schema = `test_${crypto.randomBytes(6).toString("hex")}`;
+
+  // Bootstrap: create the schema using a one-off client BEFORE the app's
+  // pooled connections (which will have this schema baked into their
+  // startup options) try to use it — Postgres won't auto-create a schema
+  // referenced only via search_path.
+  const bootstrapClient = new pg.Client({ connectionString: baseConnectionString });
+  await bootstrapClient.connect();
+  await bootstrapClient.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+  await bootstrapClient.end();
+
+  process.env.DATABASE_URL = baseConnectionString;
+  process.env.PG_SEARCH_PATH = schema;
   process.env.JWT_SECRET = crypto.randomBytes(32).toString("hex");
   process.env.JWT_EXPIRES_IN = "1h";
   process.env.PAYSTACK_SECRET_KEY = "sk_test_mock_secret_for_tests_only";
@@ -24,11 +51,13 @@ export async function setupTestEnv({ autoSucceed = true, delayMs = 30 } = {}) {
   process.env.PAYMENT_RATE_LIMIT_MAX = "10000"; // real limit (10/min) would be hit within a few test cases
   process.env.NODE_ENV = "test";
 
-  // Import AFTER env vars above are set (auth.js/pricing.js read them at
-  // import time) but BEFORE we know the mock's port — lib/paystack.js reads
-  // PAYSTACK_BASE_URL lazily inside its functions specifically so this
-  // ordering works: we set that particular var further down, once we know it.
+  // Import AFTER env vars above are set (db/index.js, auth.js, pricing.js
+  // all read them at import time) but BEFORE we know the mock's port —
+  // lib/paystack.js reads PAYSTACK_BASE_URL lazily inside its functions
+  // specifically so this ordering works: we set that particular var
+  // further down, once we know it.
   const { default: app } = await import("../../server.js");
+  const { pool } = await import("../../db/index.js");
 
   const backendServer = app.listen(0);
   await new Promise((resolve) => backendServer.once("listening", resolve));
@@ -69,7 +98,6 @@ export async function setupTestEnv({ autoSucceed = true, delayMs = 30 } = {}) {
   }
 
   async function fireWebhookEvent(event) {
-    const crypto = await import("crypto");
     const body = JSON.stringify(event);
     const signature = crypto.createHmac("sha512", process.env.PAYSTACK_SECRET_KEY).update(body).digest("hex");
     const res = await fetch(`http://localhost:${backendPort}/api/webhooks/paystack`, {
@@ -83,9 +111,11 @@ export async function setupTestEnv({ autoSucceed = true, delayMs = 30 } = {}) {
   async function teardown() {
     await new Promise((resolve) => backendServer.close(resolve));
     await new Promise((resolve) => mockServer.close(resolve));
-    fs.rmSync(dbPath, { force: true });
-    fs.rmSync(`${dbPath}-shm`, { force: true });
-    fs.rmSync(`${dbPath}-wal`, { force: true });
+    await pool.end(); // close this test's connection pool before dropping its schema
+    const cleanupClient = new pg.Client({ connectionString: baseConnectionString });
+    await cleanupClient.connect();
+    await cleanupClient.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    await cleanupClient.end();
   }
 
   return { api, signup, teardown, fireWebhookEvent, backendPort, mockPort };

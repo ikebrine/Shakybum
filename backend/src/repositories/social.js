@@ -1,6 +1,10 @@
 import { db } from "../db/index.js";
 import { newId } from "../lib/id.js";
 
+// Postgres unique-violation error code — replaces the SQLITE_CONSTRAINT_UNIQUE
+// string check from the pre-migration SQLite version.
+const UNIQUE_VIOLATION = "23505";
+
 // ── Posts ──
 function toPost(row) {
   if (!row) return null;
@@ -11,62 +15,66 @@ function toPost(row) {
   };
 }
 export const postsRepo = {
-  create({ userId, videoUrl, caption, moveTag, kind = "post" }) {
+  async create({ userId, videoUrl, caption, moveTag, kind = "post" }) {
     const id = newId("post");
-    db.prepare(
-      `INSERT INTO posts (id, user_id, video_url, caption, move_tag, kind) VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(id, userId, videoUrl ?? null, caption ?? "", moveTag ?? null, kind);
-    return this.findById(id);
+    const { rows } = await db.query(
+      `INSERT INTO posts (id, user_id, video_url, caption, move_tag, kind) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [id, userId, videoUrl ?? null, caption ?? "", moveTag ?? null, kind]
+    );
+    return toPost(rows[0]);
   },
-  findById(id) {
-    return toPost(db.prepare(`SELECT * FROM posts WHERE id = ?`).get(id));
+  async findById(id) {
+    const { rows } = await db.query(`SELECT * FROM posts WHERE id = $1`, [id]);
+    return toPost(rows[0]);
   },
-  feed({ kind = "post", limit = 30, before } = {}) {
-    const rows = before
-      ? db.prepare(`SELECT * FROM posts WHERE kind = ? AND created_at < ? ORDER BY created_at DESC LIMIT ?`).all(kind, before, limit)
-      : db.prepare(`SELECT * FROM posts WHERE kind = ? ORDER BY created_at DESC LIMIT ?`).all(kind, limit);
+  async feed({ kind = "post", limit = 30, before } = {}) {
+    const { rows } = before
+      ? await db.query(`SELECT * FROM posts WHERE kind = $1 AND created_at < $2 ORDER BY created_at DESC LIMIT $3`, [kind, before, limit])
+      : await db.query(`SELECT * FROM posts WHERE kind = $1 ORDER BY created_at DESC LIMIT $2`, [kind, limit]);
     return rows.map(toPost);
   },
-  byUser(userId, { kind } = {}) {
-    const rows = kind
-      ? db.prepare(`SELECT * FROM posts WHERE user_id = ? AND kind = ? ORDER BY created_at DESC`).all(userId, kind)
-      : db.prepare(`SELECT * FROM posts WHERE user_id = ? ORDER BY created_at DESC`).all(userId);
+  async byUser(userId, { kind } = {}) {
+    const { rows } = kind
+      ? await db.query(`SELECT * FROM posts WHERE user_id = $1 AND kind = $2 ORDER BY created_at DESC`, [userId, kind])
+      : await db.query(`SELECT * FROM posts WHERE user_id = $1 ORDER BY created_at DESC`, [userId]);
     return rows.map(toPost);
   },
-  countByUser(userId) {
-    return db.prepare(`SELECT COUNT(*) as n FROM posts WHERE user_id = ?`).get(userId).n;
+  async countByUser(userId) {
+    const { rows } = await db.query(`SELECT COUNT(*)::int as n FROM posts WHERE user_id = $1`, [userId]);
+    return rows[0].n;
   },
-  delete(id, userId) {
-    const info = db.prepare(`DELETE FROM posts WHERE id = ? AND user_id = ?`).run(id, userId);
-    return info.changes > 0;
+  async delete(id, userId) {
+    const { rowCount } = await db.query(`DELETE FROM posts WHERE id = $1 AND user_id = $2`, [id, userId]);
+    return rowCount > 0;
   },
-  incrementLikes(id, delta) {
-    db.prepare(`UPDATE posts SET likes_count = likes_count + ? WHERE id = ?`).run(delta, id);
+  async incrementLikes(id, delta) {
+    await db.query(`UPDATE posts SET likes_count = likes_count + $1 WHERE id = $2`, [delta, id]);
   },
-  incrementComments(id, delta) {
-    db.prepare(`UPDATE posts SET comments_count = comments_count + ? WHERE id = ?`).run(delta, id);
+  async incrementComments(id, delta) {
+    await db.query(`UPDATE posts SET comments_count = comments_count + $1 WHERE id = $2`, [delta, id]);
   },
 };
 
 // ── Likes ──
 export const likesRepo = {
-  add(postId, userId) {
+  async add(postId, userId) {
     try {
-      db.prepare(`INSERT INTO likes (id, post_id, user_id) VALUES (?, ?, ?)`).run(newId("like"), postId, userId);
-      postsRepo.incrementLikes(postId, 1);
+      await db.query(`INSERT INTO likes (id, post_id, user_id) VALUES ($1, $2, $3)`, [newId("like"), postId, userId]);
+      await postsRepo.incrementLikes(postId, 1);
       return true;
     } catch (err) {
-      if (err.code === "SQLITE_CONSTRAINT_UNIQUE" || err.code === "SQLITE_CONSTRAINT_PRIMARYKEY") return false; // already liked — idempotent
+      if (err.code === UNIQUE_VIOLATION) return false; // already liked — idempotent
       throw err;
     }
   },
-  remove(postId, userId) {
-    const info = db.prepare(`DELETE FROM likes WHERE post_id = ? AND user_id = ?`).run(postId, userId);
-    if (info.changes > 0) postsRepo.incrementLikes(postId, -1);
-    return info.changes > 0;
+  async remove(postId, userId) {
+    const { rowCount } = await db.query(`DELETE FROM likes WHERE post_id = $1 AND user_id = $2`, [postId, userId]);
+    if (rowCount > 0) await postsRepo.incrementLikes(postId, -1);
+    return rowCount > 0;
   },
-  hasLiked(postId, userId) {
-    return !!db.prepare(`SELECT 1 FROM likes WHERE post_id = ? AND user_id = ?`).get(postId, userId);
+  async hasLiked(postId, userId) {
+    const { rows } = await db.query(`SELECT 1 FROM likes WHERE post_id = $1 AND user_id = $2`, [postId, userId]);
+    return rows.length > 0;
   },
 };
 
@@ -76,54 +84,62 @@ function toComment(row) {
   return { id: row.id, postId: row.post_id, userId: row.user_id, text: row.text, createdAt: row.created_at };
 }
 export const commentsRepo = {
-  create({ postId, userId, text }) {
+  async create({ postId, userId, text }) {
     const id = newId("cmt");
-    db.prepare(`INSERT INTO comments (id, post_id, user_id, text) VALUES (?, ?, ?, ?)`).run(id, postId, userId, text);
-    postsRepo.incrementComments(postId, 1);
-    return this.findById(id);
+    const { rows } = await db.query(
+      `INSERT INTO comments (id, post_id, user_id, text) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [id, postId, userId, text]
+    );
+    await postsRepo.incrementComments(postId, 1);
+    return toComment(rows[0]);
   },
-  findById(id) {
-    return toComment(db.prepare(`SELECT * FROM comments WHERE id = ?`).get(id));
-  },
-  byPost(postId) {
-    return db.prepare(`SELECT * FROM comments WHERE post_id = ? ORDER BY created_at ASC`).all(postId).map(toComment);
+  async byPost(postId) {
+    const { rows } = await db.query(`SELECT * FROM comments WHERE post_id = $1 ORDER BY created_at ASC`, [postId]);
+    return rows.map(toComment);
   },
 };
 
 // ── Follows ──
 export const followsRepo = {
-  follow(followerId, followeeId) {
+  async follow(followerId, followeeId) {
     if (followerId === followeeId) return false;
     try {
-      db.prepare(`INSERT INTO follows (id, follower_id, followee_id) VALUES (?, ?, ?)`).run(newId("flw"), followerId, followeeId);
+      await db.query(`INSERT INTO follows (id, follower_id, followee_id) VALUES ($1, $2, $3)`, [newId("flw"), followerId, followeeId]);
       return true;
     } catch (err) {
-      if (err.code === "SQLITE_CONSTRAINT_UNIQUE" || err.code === "SQLITE_CONSTRAINT_PRIMARYKEY") return false; // already following — idempotent
+      if (err.code === UNIQUE_VIOLATION) return false; // already following — idempotent
       throw err;
     }
   },
-  unfollow(followerId, followeeId) {
-    const info = db.prepare(`DELETE FROM follows WHERE follower_id = ? AND followee_id = ?`).run(followerId, followeeId);
-    return info.changes > 0;
+  async unfollow(followerId, followeeId) {
+    const { rowCount } = await db.query(`DELETE FROM follows WHERE follower_id = $1 AND followee_id = $2`, [followerId, followeeId]);
+    return rowCount > 0;
   },
-  isFollowing(followerId, followeeId) {
-    return !!db.prepare(`SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?`).get(followerId, followeeId);
+  async isFollowing(followerId, followeeId) {
+    const { rows } = await db.query(`SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = $2`, [followerId, followeeId]);
+    return rows.length > 0;
   },
-  followerCount(userId) {
-    return db.prepare(`SELECT COUNT(*) as n FROM follows WHERE followee_id = ?`).get(userId).n;
+  async followerCount(userId) {
+    const { rows } = await db.query(`SELECT COUNT(*)::int as n FROM follows WHERE followee_id = $1`, [userId]);
+    return rows[0].n;
   },
-  followingCount(userId) {
-    return db.prepare(`SELECT COUNT(*) as n FROM follows WHERE follower_id = ?`).get(userId).n;
+  async followingCount(userId) {
+    const { rows } = await db.query(`SELECT COUNT(*)::int as n FROM follows WHERE follower_id = $1`, [userId]);
+    return rows[0].n;
   },
-  followers(userId) {
-    return db.prepare(
-      `SELECT u.* FROM follows f JOIN users u ON u.id = f.follower_id WHERE f.followee_id = ? ORDER BY f.created_at DESC`
-    ).all(userId);
+  async followers(userId) {
+    const { rows } = await db.query(
+      `SELECT u.* FROM follows f JOIN users u ON u.id = f.follower_id WHERE f.followee_id = $1 ORDER BY f.created_at DESC`,
+      [userId]
+    );
+    return rows;
   },
-  following(userId) {
-    return db.prepare(
-      `SELECT u.* FROM follows f JOIN users u ON u.id = f.followee_id WHERE f.follower_id = ? ORDER BY f.created_at DESC`
-    ).all(userId);
+  async following(userId) {
+    const { rows } = await db.query(
+      `SELECT u.* FROM follows f JOIN users u ON u.id = f.followee_id WHERE f.follower_id = $1 ORDER BY f.created_at DESC`,
+      [userId]
+    );
+    return rows;
   },
 };
 
@@ -133,31 +149,40 @@ function toChallenge(row) {
   return { id: row.id, creatorId: row.creator_id, title: row.title, description: row.description, moveTag: row.move_tag, createdAt: row.created_at };
 }
 export const challengesRepo = {
-  create({ creatorId, title, description, moveTag }) {
+  async create({ creatorId, title, description, moveTag }) {
     const id = newId("chal");
-    db.prepare(`INSERT INTO challenges (id, creator_id, title, description, move_tag) VALUES (?, ?, ?, ?, ?)`)
-      .run(id, creatorId, title, description ?? "", moveTag ?? null);
-    return this.findById(id);
+    const { rows } = await db.query(
+      `INSERT INTO challenges (id, creator_id, title, description, move_tag) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [id, creatorId, title, description ?? "", moveTag ?? null]
+    );
+    return toChallenge(rows[0]);
   },
-  findById(id) {
-    return toChallenge(db.prepare(`SELECT * FROM challenges WHERE id = ?`).get(id));
+  async findById(id) {
+    const { rows } = await db.query(`SELECT * FROM challenges WHERE id = $1`, [id]);
+    return toChallenge(rows[0]);
   },
-  list({ limit = 30 } = {}) {
-    return db.prepare(`SELECT * FROM challenges ORDER BY created_at DESC LIMIT ?`).all(limit).map(toChallenge);
+  async list({ limit = 30 } = {}) {
+    const { rows } = await db.query(`SELECT * FROM challenges ORDER BY created_at DESC LIMIT $1`, [limit]);
+    return rows.map(toChallenge);
   },
-  addEntry({ challengeId, userId, postId }) {
+  async addEntry({ challengeId, userId, postId }) {
     const id = newId("entry");
     try {
-      db.prepare(`INSERT INTO challenge_entries (id, challenge_id, user_id, post_id) VALUES (?, ?, ?, ?)`).run(id, challengeId, userId, postId);
+      await db.query(
+        `INSERT INTO challenge_entries (id, challenge_id, user_id, post_id) VALUES ($1, $2, $3, $4)`,
+        [id, challengeId, userId, postId]
+      );
       return true;
     } catch (err) {
-      if (err.code === "SQLITE_CONSTRAINT_UNIQUE" || err.code === "SQLITE_CONSTRAINT_PRIMARYKEY") return false;
+      if (err.code === UNIQUE_VIOLATION) return false;
       throw err;
     }
   },
-  entries(challengeId) {
-    return db.prepare(
-      `SELECT ce.*, p.video_url, p.caption FROM challenge_entries ce JOIN posts p ON p.id = ce.post_id WHERE ce.challenge_id = ? ORDER BY ce.created_at DESC`
-    ).all(challengeId);
+  async entries(challengeId) {
+    const { rows } = await db.query(
+      `SELECT ce.*, p.video_url, p.caption FROM challenge_entries ce JOIN posts p ON p.id = ce.post_id WHERE ce.challenge_id = $1 ORDER BY ce.created_at DESC`,
+      [challengeId]
+    );
+    return rows;
   },
 };

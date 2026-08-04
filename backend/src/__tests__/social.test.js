@@ -84,7 +84,7 @@ test("badge: auto-computes from moves posted + followers, gated correctly (AND n
 
   // Directly insert 500 synthetic followers (bypasses bcrypt-cost-12 signup
   // for setup data — the thing under test is badge computation, not signup)
-  bulkFollow(creator.user.id, 500);
+  await bulkFollow(creator.user.id, 500);
   recomputeBadge(creator.user.id); // bulkFollow writes directly to DB, so trigger recompute manually
 
   me = (await env.api("GET", "/auth/me", { token: creator.token })).body.user;
@@ -94,7 +94,7 @@ test("badge: auto-computes from moves posted + followers, gated correctly (AND n
 test("badge: dropping below eligibility auto-disables bumEnabled", async () => {
   const creator = await newUser("dropper");
   const { setBadge } = await import("./helpers/devTools.js");
-  setBadge(creator.user.handle, "SilverQueen");
+  await setBadge(creator.user.handle, "SilverQueen");
   const enable = await env.api("PATCH", "/users/me/bum-settings", { token: creator.token, body: { bumEnabled: true } });
   assert.equal(enable.body.user.bumEnabled, true);
 

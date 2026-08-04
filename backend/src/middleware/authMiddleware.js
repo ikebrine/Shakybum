@@ -8,7 +8,7 @@ export async function requireAuth(req, res, next) {
 
   try {
     const payload = verifyToken(token);
-    const user = usersRepo.findById(payload.sub);
+    const user = await usersRepo.findById(payload.sub);
     if (!user) return res.status(401).json({ error: "User no longer exists" });
     req.user = user;
     next();

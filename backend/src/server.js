@@ -17,7 +17,7 @@ import postsRoutes from "./routes/posts.routes.js";
 import followsRoutes from "./routes/follows.routes.js";
 import challengesRoutes from "./routes/challenges.routes.js";
 
-migrate();
+await migrate();
 
 const app = express();
 

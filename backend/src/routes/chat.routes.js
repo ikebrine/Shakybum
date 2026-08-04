@@ -12,21 +12,25 @@ const router = Router();
 // them in EITHER direction — mirrors the frontend's "chat opens after
 // approved contact" rule, enforced here so it can't be bypassed by calling
 // the API directly.
-function canChat(userA, userB) {
-  return contactRequestsRepo.isApprovedBetween(userA, userB) || contactRequestsRepo.isApprovedBetween(userB, userA);
+async function canChat(userA, userB) {
+  const [a, b] = await Promise.all([
+    contactRequestsRepo.isApprovedBetween(userA, userB),
+    contactRequestsRepo.isApprovedBetween(userB, userA),
+  ]);
+  return a || b;
 }
 
-router.get("/:userId/messages", requireAuth, (req, res) => {
-  const other = usersRepo.findById(req.params.userId);
+router.get("/:userId/messages", requireAuth, asyncHandler(async (req, res) => {
+  const other = await usersRepo.findById(req.params.userId);
   if (!other) return res.status(404).json({ error: "User not found" });
-  if (!canChat(req.user.id, other.id)) return res.status(403).json({ error: "Chat unlocks after an approved contact request" });
-  res.json({ messages: messagesRepo.listBetween(req.user.id, other.id) });
-});
+  if (!(await canChat(req.user.id, other.id))) return res.status(403).json({ error: "Chat unlocks after an approved contact request" });
+  res.json({ messages: await messagesRepo.listBetween(req.user.id, other.id) });
+}));
 
 router.post("/:userId/messages", requireAuth, asyncHandler(async (req, res) => {
-  const other = usersRepo.findById(req.params.userId);
+  const other = await usersRepo.findById(req.params.userId);
   if (!other) return res.status(404).json({ error: "User not found" });
-  if (!canChat(req.user.id, other.id)) return res.status(403).json({ error: "Chat unlocks after an approved contact request" });
+  if (!(await canChat(req.user.id, other.id))) return res.status(403).json({ error: "Chat unlocks after an approved contact request" });
 
   const { text } = req.body;
   if (!text || !text.trim()) return res.status(400).json({ error: "Message text required" });
@@ -36,8 +40,8 @@ router.post("/:userId/messages", requireAuth, asyncHandler(async (req, res) => {
   const flag = scanContactInfo(text);
   if (flag.flagged) return res.status(400).json({ error: `Message can't include ${flag.reason}` });
 
-  const message = messagesRepo.create({ senderId: req.user.id, otherUserId: other.id, text: text.trim() });
-  notificationsRepo.create({ userId: other.id, type: "message", text: `New message from ${req.user.name}` });
+  const message = await messagesRepo.create({ senderId: req.user.id, otherUserId: other.id, text: text.trim() });
+  await notificationsRepo.create({ userId: other.id, type: "message", text: `New message from ${req.user.name}` });
   res.status(201).json({ message });
 }));
 

@@ -63,13 +63,13 @@ test("webhook: transfer.failed marks payout_failed and notifies the creator (not
   // (autoSucceed: false), the payment is still sitting in "processing_payout" —
   // we look it up via the dev-only introspection helper.
   const { getPaymentByRefId } = await import("./helpers/devTools.js");
-  const payment = getPaymentByRefId(crId);
+  const payment = await getPaymentByRefId(crId);
   assert.equal(payment.status, "processing_payout");
 
   await env.fireWebhookEvent({ event: "transfer.failed", data: { reference: payment.payoutReference, reason: "Insufficient balance" } });
 
   const { getPaymentByRefId: recheck } = await import("./helpers/devTools.js");
-  const failedPayment = recheck(crId);
+  const failedPayment = await recheck(crId);
   assert.equal(failedPayment.status, "payout_failed");
 
   const notifs = await env.api("GET", "/notifications", { token: creator.token });
@@ -88,11 +88,11 @@ test("webhook: refund.processed confirms a declined request's refund", async () 
   await env.api("POST", `/contact-requests/${initiate.body.contactRequest.id}/decline`, { token: creator.token });
 
   const { getPaymentByRefId } = await import("./helpers/devTools.js");
-  const processing = getPaymentByRefId(initiate.body.contactRequest.id);
+  const processing = await getPaymentByRefId(initiate.body.contactRequest.id);
   assert.equal(processing.status, "processing_refund");
 
   await env.fireWebhookEvent({ event: "refund.processed", data: { transaction: { reference: processing.paystackReference } } });
 
-  const confirmed = getPaymentByRefId(initiate.body.contactRequest.id);
+  const confirmed = await getPaymentByRefId(initiate.body.contactRequest.id);
   assert.equal(confirmed.status, "refunded");
 });

@@ -1,55 +1,83 @@
 # Shakybum Backend
 
-Real Express + SQLite backend covering: escrow-based payments (contact
+Real Express + Postgres backend covering: escrow-based payments (contact
 reveals, duration-billed Bum sessions, paid extensions), Paystack MoMo
 integration with proper async webhook confirmation, chat gating, the social
 graph (posts/likes/comments/follows/challenges), badge computation from
-real activity, and contact-info leak filtering — all backed by an automated
-test suite, not just manual spot-checks.
+real activity, and contact-info leak filtering.
 
-**Test suite: 21/21 passing.** Run `npm test` — see "Testing" below for how
-it works without a live Paystack account.
+> **⚠️ Migration status:** this backend was originally built and verified
+> end-to-end (21/21 automated tests passing, full manual flow testing)
+> against SQLite. It was then migrated to Postgres to run on Supabase.
+> Every file was rewritten carefully and passed syntax checks, but **the
+> Postgres version has not been run against a real database** — the dev
+> sandbox that built this couldn't get a working local Postgres server
+> (the Ubuntu package mirror 404s on the actual `postgresql-16` binary,
+> a real infrastructure gap, not something routed around) and has no
+> network access to Supabase directly. **Run `npm test` against your own
+> Postgres/Supabase instance before trusting this with real payments** —
+> see "Running tests" below.
 
 ## Stack
 
 - **Express** — HTTP layer
-- **better-sqlite3** — synchronous SQLite driver, zero external setup. Fine
-  for dev and small-scale single-instance production; see "Scaling to
-  Postgres" below for when to move off it.
+- **Postgres** via `pg` (node-postgres) — targets Supabase, but works with
+  any Postgres 14+
 - **JWT** (jsonwebtoken) — auth
 - **bcryptjs** — password hashing
 - **Paystack** — MoMo charges, transfers (payouts), refunds, webhooks
 
-*(A Prisma+Postgres version of this schema was the original plan — dropped
-because Prisma's engine binary download is blocked by this dev sandbox's
-network policy. `better-sqlite3` was chosen specifically because it could
-actually be installed and tested here, rather than shipped unverified. The
-schema in `src/db/schema.sql` is deliberately close to portable SQL if you
-want to move to Postgres later — see below.)*
+Money columns (`amount`, `platform_cut`, `creator_cut`) use `NUMERIC(10,2)`,
+not `REAL`/`FLOAT` — floating-point currency was a latent correctness risk
+in an earlier SQLite version of this schema, fixed during the Postgres
+migration rather than carried forward.
 
 ## Setup
 
 ```bash
 npm install
 cp .env.example .env
-# edit .env: set a real JWT_SECRET (openssl rand -hex 32) and your Paystack keys
-node -e "import('./src/db/index.js').then(({migrate}) => migrate())"  # creates dev.db
+# edit .env:
+#  - DATABASE_URL: your Supabase connection string (Project Settings → Database → Connection string)
+#  - JWT_SECRET: a real random value (openssl rand -hex 32)
+#  - PAYSTACK_SECRET_KEY / PAYSTACK_PUBLIC_KEY: from your Paystack dashboard
 npm run dev
 ```
+
+Tables are created automatically on startup (`migrate()` runs `CREATE
+TABLE IF NOT EXISTS` for everything in `src/db/schema.sql` — safe to run
+every time the server starts, not just once).
 
 Server runs on `http://localhost:4000` by default. `GET /health` should
 return `{"ok":true}`.
 
-## Automated test suite
+## Running tests
 
 ```bash
 npm test
 ```
 
+**Requires a real, reachable Postgres** — set `TEST_DATABASE_URL` in `.env`
+(falls back to `DATABASE_URL` if unset, which is fine for solo local dev
+but risky in CI or anywhere `DATABASE_URL` might point at real data).
+This is a genuine trade-off from the pre-Postgres version of this suite,
+which used a disposable SQLite file per test run and needed no external
+services at all.
+
+Cheapest ways to get a test Postgres:
+- A local Postgres (Docker: `docker run -e POSTGRES_PASSWORD=x -p 5432:5432 postgres:16`)
+- A second free Supabase project used only for tests
+- Neon/Railway's free-tier Postgres
+
+**Isolation**: each test file creates its own Postgres *schema*
+(`CREATE SCHEMA test_xxxxx`, dropped on teardown) rather than sharing
+tables — `node --test` runs files in parallel by default, so without this,
+two test files would corrupt each other's data mid-run. See
+`src/__tests__/helpers/testEnv.js`.
+
 21 tests across 4 files, using an in-process mock Paystack server (fast
-delays, no manual setup needed — this is different from the standalone
-`scripts/mock-paystack-server.js`, though both share the same underlying
-`src/lib/mockPaystackApp.js` factory):
+delays — different from the standalone `scripts/mock-paystack-server.js`
+used for manual testing, though both share `src/lib/mockPaystackApp.js`):
 
 - **`badges.unit.test.js`** — pure unit tests for badge threshold logic (no
   server/DB), including that thresholds require BOTH moves AND followers,
@@ -69,20 +97,17 @@ delays, no manual setup needed — this is different from the standalone
   the `transfer.failed` / `refund.processed` async confirmation paths that
   the happy-path tests don't reach.
 
-### How the test harness solves the "can't reach api.paystack.co" problem
-
-`src/__tests__/helpers/testEnv.js` starts the real backend app and an
-in-process mock Paystack server on ephemeral ports, wires them to each
-other (backend's webhook URL → mock; mock's base URL → backend, via
-`PAYSTACK_BASE_URL`), and gives each test file a fresh SQLite database.
-Each `node --test` file runs in its own process, so parallel test files
-never collide on ports or data.
+*(This test suite passed 21/21 against the pre-migration SQLite backend —
+the assertions and flow logic haven't changed, only the storage layer
+underneath them. It has not yet been re-run against Postgres — do that
+first, before relying on any of the "verified" claims below.)*
 
 ## Testing manually (without a live Paystack account)
 
-For manual/exploratory testing against a real running server (as opposed
-to the automated suite above), `scripts/mock-paystack-server.js` does the
-same job as a standalone CLI process:
+`scripts/mock-paystack-server.js` mimics Paystack's charge/transfer/refund
+endpoints and fires real signed webhooks back at a running backend — good
+for exploratory testing against a real server instance (as opposed to the
+automated suite, which spins up its own in-process instance per file):
 
 ```bash
 # Terminal 1
@@ -92,12 +117,11 @@ node src/server.js
 PAYSTACK_SECRET_KEY=<same as .env> node scripts/mock-paystack-server.js
 ```
 
-Then set `PAYSTACK_BASE_URL="http://localhost:5555"` in `.env` (commented
-out by default — only for local testing, never set this in production) and
-restart the backend. Every `initiateMomoCharge` call now hits the mock
-instead of the real API.
+Then set `PAYSTACK_BASE_URL="http://localhost:5555"` in `.env` (only for
+local testing — never set this in production) and restart the backend.
 
-**What was actually verified this way**, end to end:
+**What was verified this way against the pre-migration SQLite backend**
+(see the migration-status warning at the top — re-verify against Postgres):
 - Signup validation (password length, handle format, contact-info leak filter on handles)
 - Bio update blocked when it contains contact info
 - Contact request: initiate → webhook confirms → `paid_hold` → approve → payout released → real contact info revealed to payer only
@@ -110,6 +134,12 @@ instead of the real API.
 
 See `.env.example` for the full list with comments. The ones that matter most:
 
+- `DATABASE_URL` — Supabase (or any Postgres) connection string. Use the
+  connection-pooling URL (port 6543) if deploying to a serverless platform
+  with many short-lived connections; the direct URL (port 5432) for a
+  long-running server (Railway/Render/Fly).
+- `TEST_DATABASE_URL` — separate Postgres for `npm test`. Never point this
+  at production data.
 - `JWT_SECRET` — must be a real random value in production; the server
   refuses to start with the placeholder if `NODE_ENV=production`.
 - `PAYSTACK_SECRET_KEY` — from your Paystack dashboard. Used both for API
@@ -120,33 +150,17 @@ See `.env.example` for the full list with comments. The ones that matter most:
 
 ## Deployment
 
-This needs a host that isn't network-restricted the way this dev sandbox
-is — Railway, Render, and Fly.io all work and have free/cheap tiers, and
-all can reach `api.paystack.co` normally.
+This needs a host that isn't network-restricted the way the dev sandbox
+that built this is — Railway, Render, Fly.io, and Vercel (serverless
+functions) all work and can reach both `api.paystack.co` and Supabase
+normally.
 
 1. Deploy this `backend/` folder.
 2. Set all env vars from `.env.example` in your host's dashboard (never commit `.env`).
 3. In the Paystack dashboard, set your webhook URL to
    `https://your-deployed-backend.com/api/webhooks/paystack`.
-4. `better-sqlite3` writes to a local file (`DATABASE_PATH`) — make sure
-   your host's filesystem persists across deploys/restarts (Railway and
-   Render both support persistent volumes), or move to Postgres first (see
-   below) if you're deploying somewhere with ephemeral disk.
-
-### Scaling to Postgres
-
-`better-sqlite3` is single-writer and file-based — fine for one backend
-instance, not for horizontal scaling across multiple instances. When you
-need that:
-1. Stand up a Postgres instance (Railway/Render/Supabase/Neon all have
-   cheap tiers).
-2. The SQL in `src/db/schema.sql` is close to portable already — main
-   changes needed: `TEXT` → keep as-is (uuid strings work fine in Postgres
-   too), `datetime('now')` → `now()`, `INTEGER` booleans → real `BOOLEAN`.
-3. Swap `src/db/index.js` and the `src/repositories/*.js` files for a
-   Postgres driver (`pg` or `postgres.js`) — the repository function
-   signatures are already the seam that isolates the rest of the app from
-   the storage layer, so this is a contained change.
+4. Point `DATABASE_URL` at your Supabase project — tables auto-create on
+   first startup.
 
 ## API surface added for the social/content layer
 
@@ -175,9 +189,10 @@ a badge during testing/demos.
 
 ## Known gaps (what's genuinely still missing)
 
-- **No media storage/CDN.** As noted above, `video_url` is metadata-only —
-  actual file upload/hosting needs S3, Cloudinary, Mux, or similar wired in
-  separately.
+- **Postgres migration is unverified against a real database** — see the
+  warning at the top of this file. This is the most important gap right now.
+- **No media storage/CDN.** `video_url` is metadata-only — actual file
+  upload/hosting needs S3, Cloudinary, Mux, or similar wired in separately.
 - **Chat and notifications are poll-based, not real-time.** `GET
   /api/chat/:userId/messages` and `GET /api/notifications` need to be
   polled by a client; there's no websocket/SSE push. Fine for an MVP,
@@ -188,10 +203,9 @@ a badge during testing/demos.
   `escrow.service.js`) other than direct DB access.
 - **Paystack webhook event shapes for `transfer.success`/`transfer.failed`/
   `refund.processed` are implemented against Paystack's documented payloads
-  but weren't verified against a live account** (this dev environment can't
-  reach `api.paystack.co`). Check your Paystack dashboard's webhook event
-  log against the field paths in `escrow.service.js` before relying on this
-  in production.
+  but weren't verified against a live account.** Check your Paystack
+  dashboard's webhook event log against the field paths in
+  `escrow.service.js` before relying on this in production.
 - **Rate limiting is in-memory** (`express-rate-limit`'s default store) —
   fine for one instance, resets on restart, and won't be shared correctly
   across multiple instances if you scale horizontally. Swap in a

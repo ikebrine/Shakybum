@@ -7,7 +7,7 @@ function toRow(row) {
     id: row.id,
     payerId: row.payer_id,
     creatorId: row.creator_id,
-    amount: row.amount,
+    amount: Number(row.amount),
     status: row.status,
     paystackReference: row.paystack_reference,
     createdAt: row.created_at,
@@ -16,33 +16,42 @@ function toRow(row) {
 }
 
 export const contactRequestsRepo = {
-  create({ payerId, creatorId, amount, paystackReference }) {
+  async create({ payerId, creatorId, amount, paystackReference }) {
     const id = newId("creq");
-    db.prepare(
-      `INSERT INTO contact_requests (id, payer_id, creator_id, amount, paystack_reference) VALUES (?, ?, ?, ?, ?)`
-    ).run(id, payerId, creatorId, amount, paystackReference);
+    await db.query(
+      `INSERT INTO contact_requests (id, payer_id, creator_id, amount, paystack_reference) VALUES ($1, $2, $3, $4, $5)`,
+      [id, payerId, creatorId, amount, paystackReference]
+    );
     return this.findById(id);
   },
-  findById(id) {
-    return toRow(db.prepare(`SELECT * FROM contact_requests WHERE id = ?`).get(id));
+  async findById(id) {
+    const { rows } = await db.query(`SELECT * FROM contact_requests WHERE id = $1`, [id]);
+    return toRow(rows[0]);
   },
-  findByReference(ref) {
-    return toRow(db.prepare(`SELECT * FROM contact_requests WHERE paystack_reference = ?`).get(ref));
+  async findByReference(ref) {
+    const { rows } = await db.query(`SELECT * FROM contact_requests WHERE paystack_reference = $1`, [ref]);
+    return toRow(rows[0]);
   },
-  setStatus(id, status) {
-    db.prepare(`UPDATE contact_requests SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, id);
+  async setStatus(id, status) {
+    await db.query(`UPDATE contact_requests SET status = $1, updated_at = now() WHERE id = $2`, [status, id]);
     return this.findById(id);
   },
-  receivedFor(creatorId, status = "paid_hold") {
-    return db.prepare(`SELECT * FROM contact_requests WHERE creator_id = ? AND status = ? ORDER BY created_at DESC`).all(creatorId, status).map(toRow);
+  async receivedFor(creatorId, status = "paid_hold") {
+    const { rows } = await db.query(
+      `SELECT * FROM contact_requests WHERE creator_id = $1 AND status = $2 ORDER BY created_at DESC`,
+      [creatorId, status]
+    );
+    return rows.map(toRow);
   },
-  sentBy(payerId) {
-    return db.prepare(`SELECT * FROM contact_requests WHERE payer_id = ? ORDER BY created_at DESC`).all(payerId).map(toRow);
+  async sentBy(payerId) {
+    const { rows } = await db.query(`SELECT * FROM contact_requests WHERE payer_id = $1 ORDER BY created_at DESC`, [payerId]);
+    return rows.map(toRow);
   },
-  isApprovedBetween(payerId, creatorId) {
-    const row = db.prepare(
-      `SELECT 1 FROM contact_requests WHERE payer_id = ? AND creator_id = ? AND status = 'approved' LIMIT 1`
-    ).get(payerId, creatorId);
-    return !!row;
+  async isApprovedBetween(payerId, creatorId) {
+    const { rows } = await db.query(
+      `SELECT 1 FROM contact_requests WHERE payer_id = $1 AND creator_id = $2 AND status = 'approved' LIMIT 1`,
+      [payerId, creatorId]
+    );
+    return rows.length > 0;
   },
 };

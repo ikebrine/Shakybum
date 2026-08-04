@@ -126,7 +126,7 @@ test("chat: blocked before approval, unlocked after, still filters contact info"
 test("Bum session: full lifecycle — book, approve, start, extend, end", async () => {
   const { creator, payer } = await makeCreatorAndPayer();
   const { setBadge } = await import("./helpers/devTools.js");
-  setBadge(creator.user.handle, "SilverQueen");
+  await setBadge(creator.user.handle, "SilverQueen");
   await env.api("PATCH", "/users/me/bum-settings", { token: creator.token, body: { bumEnabled: true } });
 
   const book = await env.api("POST", "/bum-sessions", {

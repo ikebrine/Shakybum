@@ -23,18 +23,18 @@ router.post("/signup", asyncHandler(async (req, res) => {
   const handleFlag = scanContactInfo(handle);
   if (handleFlag.flagged) return res.status(400).json({ error: `Usernames can't include ${handleFlag.reason}` });
 
-  if (usersRepo.findByEmail(email)) return res.status(409).json({ error: "Email already registered" });
-  if (usersRepo.findByHandle(handle)) return res.status(409).json({ error: "Handle already taken" });
+  if (await usersRepo.findByEmail(email)) return res.status(409).json({ error: "Email already registered" });
+  if (await usersRepo.findByHandle(handle)) return res.status(409).json({ error: "Handle already taken" });
 
   const passwordHash = await hashPassword(password);
-  const user = usersRepo.create({ email, handle, name, passwordHash });
+  const user = await usersRepo.create({ email, handle, name, passwordHash });
   const token = signToken(user);
   res.status(201).json({ token, user: toPublicUser(user) });
 }));
 
 router.post("/login", asyncHandler(async (req, res) => {
   const { email, password } = req.body;
-  const user = usersRepo.findByEmail(email || "");
+  const user = await usersRepo.findByEmail(email || "");
   if (!user) return res.status(401).json({ error: "Invalid email or password" });
 
   const ok = await verifyPassword(password || "", user.passwordHash);

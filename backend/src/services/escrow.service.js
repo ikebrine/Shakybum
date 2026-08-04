@@ -20,8 +20,8 @@ export async function initiateContactPayment({ payer, creator, phone, provider }
   const amount = priceForContact(creator.badge);
   const reference = newId("pstk_contact");
 
-  const contactRequest = contactRequestsRepo.create({ payerId: payer.id, creatorId: creator.id, amount, paystackReference: reference });
-  const payment = paymentsRepo.create({
+  const contactRequest = await contactRequestsRepo.create({ payerId: payer.id, creatorId: creator.id, amount, paystackReference: reference });
+  const payment = await paymentsRepo.create({
     userId: payer.id, kind: "contact", refId: contactRequest.id,
     amount, platformCut: platformFee(amount), creatorCut: creatorCut(amount), paystackReference: reference,
   });
@@ -35,8 +35,8 @@ export async function initiateContactPayment({ payer, creator, phone, provider }
   } catch (err) {
     // Charge never actually started — don't leave the request stuck in
     // "pending" forever, since nothing will ever webhook back to resolve it.
-    contactRequestsRepo.setStatus(contactRequest.id, "expired");
-    paymentsRepo.setStatus(payment.id, "failed");
+    await contactRequestsRepo.setStatus(contactRequest.id, "expired");
+    await paymentsRepo.setStatus(payment.id, "failed");
     throw err;
   }
 }
@@ -46,8 +46,8 @@ export async function initiateBumPayment({ payer, creator, mins, phone, provider
   const amount = priceForBum(creator.badge, mins);
   const reference = newId("pstk_bum");
 
-  const bumSession = bumSessionsRepo.create({ payerId: payer.id, creatorId: creator.id, mins, amount, paystackReference: reference });
-  const payment = paymentsRepo.create({
+  const bumSession = await bumSessionsRepo.create({ payerId: payer.id, creatorId: creator.id, mins, amount, paystackReference: reference });
+  const payment = await paymentsRepo.create({
     userId: payer.id, kind: "bum", refId: bumSession.id,
     amount, platformCut: platformFee(amount), creatorCut: creatorCut(amount), paystackReference: reference,
   });
@@ -59,8 +59,8 @@ export async function initiateBumPayment({ payer, creator, mins, phone, provider
     });
     return { bumSession, charge };
   } catch (err) {
-    bumSessionsRepo.setStatus(bumSession.id, "expired");
-    paymentsRepo.setStatus(payment.id, "failed");
+    await bumSessionsRepo.setStatus(bumSession.id, "expired");
+    await paymentsRepo.setStatus(payment.id, "failed");
     throw err;
   }
 }
@@ -69,12 +69,12 @@ export async function initiateBumExtension({ bumSession, payer, phone, provider 
   if (!["approved", "active"].includes(bumSession.status)) {
     throw new EscrowError("Session must be confirmed and running to extend");
   }
-  const creator = usersRepo.findById(bumSession.creatorId);
+  const creator = await usersRepo.findById(bumSession.creatorId);
   const amount = priceForBum(creator.badge, BUM_EXTEND_MIN);
   const reference = newId("pstk_ext");
 
-  const extension = bumExtensionsRepo.create({ bumSessionId: bumSession.id, mins: BUM_EXTEND_MIN, amount, paystackReference: reference });
-  const payment = paymentsRepo.create({
+  const extension = await bumExtensionsRepo.create({ bumSessionId: bumSession.id, mins: BUM_EXTEND_MIN, amount, paystackReference: reference });
+  const payment = await paymentsRepo.create({
     userId: payer.id, kind: "bum_extend", refId: extension.id,
     amount, platformCut: platformFee(amount), creatorCut: creatorCut(amount), paystackReference: reference,
   });
@@ -86,8 +86,8 @@ export async function initiateBumExtension({ bumSession, payer, phone, provider 
     });
     return { extension, charge };
   } catch (err) {
-    bumExtensionsRepo.setStatus(extension.id, "failed");
-    paymentsRepo.setStatus(payment.id, "failed");
+    await bumExtensionsRepo.setStatus(extension.id, "failed");
+    await paymentsRepo.setStatus(payment.id, "failed");
     throw err;
   }
 }
@@ -100,15 +100,15 @@ export async function initiateBumExtension({ bumSession, payer, phone, provider 
  * retry webhook delivery).
  */
 export async function handleChargeSuccess(reference) {
-  const payment = paymentsRepo.findByReference(reference);
+  const payment = await paymentsRepo.findByReference(reference);
   if (!payment) return { handled: false, reason: "no matching payment" };
   if (payment.status !== "initiated") return { handled: false, reason: `already ${payment.status}` };
 
-  paymentsRepo.setStatus(payment.id, "paid");
+  await paymentsRepo.setStatus(payment.id, "paid");
 
   if (payment.kind === "contact") {
-    const cr = contactRequestsRepo.setStatus(payment.refId, "paid_hold");
-    notificationsRepo.create({
+    const cr = await contactRequestsRepo.setStatus(payment.refId, "paid_hold");
+    await notificationsRepo.create({
       userId: cr.creatorId, type: "contact_request",
       text: `New paid contact request — GHS ${payment.amount.toFixed(2)} held in escrow. Approve or decline in Contact Requests.`,
     });
@@ -116,8 +116,8 @@ export async function handleChargeSuccess(reference) {
   }
 
   if (payment.kind === "bum") {
-    const bs = bumSessionsRepo.setStatus(payment.refId, "paid_hold");
-    notificationsRepo.create({
+    const bs = await bumSessionsRepo.setStatus(payment.refId, "paid_hold");
+    await notificationsRepo.create({
       userId: bs.creatorId, type: "bum_request",
       text: `New Live Bum session request (${bs.mins} min) — GHS ${payment.amount.toFixed(2)} held in escrow.`,
     });
@@ -127,10 +127,10 @@ export async function handleChargeSuccess(reference) {
   if (payment.kind === "bum_extend") {
     // Extensions are instant (the creator already agreed by confirming the base
     // session) — no approval hold, apply immediately and release the payout now.
-    const ext = bumExtensionsRepo.setStatus(payment.refId, "paid");
-    const session = bumSessionsRepo.extend(ext.bumSessionId, ext.mins * 60);
-    await releaseCreatorPayout({ creator: usersRepo.findById(session.creatorId), payment });
-    notificationsRepo.create({
+    const ext = await bumExtensionsRepo.setStatus(payment.refId, "paid");
+    const session = await bumSessionsRepo.extend(ext.bumSessionId, ext.mins * 60);
+    await releaseCreatorPayout({ creator: await usersRepo.findById(session.creatorId), payment });
+    await notificationsRepo.create({
       userId: session.payerId, type: "bum_extended",
       text: `+${ext.mins} min added to your session.`,
     });
@@ -165,71 +165,71 @@ async function releaseCreatorPayout({ creator, payment }) {
   // "approved" right away for UX — reversing that after the fact would be
   // worse than the alternative, so a failed transfer becomes a flagged
   // reconciliation case (see handleTransferFailed) rather than an undo.
-  paymentsRepo.setPayoutReference(payment.id, transferRef);
+  await paymentsRepo.setPayoutReference(payment.id, transferRef);
 }
 
 export async function approveContactRequest({ contactRequestId, actingUser }) {
-  const cr = contactRequestsRepo.findById(contactRequestId);
+  const cr = await contactRequestsRepo.findById(contactRequestId);
   if (!cr) throw new EscrowError("Contact request not found", 404);
   if (cr.creatorId !== actingUser.id) throw new EscrowError("Not your request to approve", 403);
   if (cr.status !== "paid_hold") throw new EscrowError(`Cannot approve a request in status '${cr.status}'`);
 
-  const payment = paymentsRepo.findByReference(cr.paystackReference);
+  const payment = await paymentsRepo.findByReference(cr.paystackReference);
   await releaseCreatorPayout({ creator: actingUser, payment });
-  const updated = contactRequestsRepo.setStatus(contactRequestId, "approved");
+  const updated = await contactRequestsRepo.setStatus(contactRequestId, "approved");
 
-  notificationsRepo.create({ userId: cr.payerId, type: "contact_approved", text: `${actingUser.name} approved your contact request!` });
+  await notificationsRepo.create({ userId: cr.payerId, type: "contact_approved", text: `${actingUser.name} approved your contact request!` });
   return updated;
 }
 
 export async function declineContactRequest({ contactRequestId, actingUser }) {
-  const cr = contactRequestsRepo.findById(contactRequestId);
+  const cr = await contactRequestsRepo.findById(contactRequestId);
   if (!cr) throw new EscrowError("Contact request not found", 404);
   if (cr.creatorId !== actingUser.id) throw new EscrowError("Not your request to decline", 403);
   if (cr.status !== "paid_hold") throw new EscrowError(`Cannot decline a request in status '${cr.status}'`);
 
   await refundTransaction({ reference: cr.paystackReference, reason: "Contact request declined" });
-  const payment = paymentsRepo.findByReference(cr.paystackReference);
+  const payment = await paymentsRepo.findByReference(cr.paystackReference);
   // Accepted by Paystack != settled — see releaseCreatorPayout for the same
   // pattern on the payout side. Confirmed via refund.processed webhook.
-  paymentsRepo.setRefundReference(payment.id, cr.paystackReference);
-  const updated = contactRequestsRepo.setStatus(contactRequestId, "declined");
+  await paymentsRepo.setRefundReference(payment.id, cr.paystackReference);
+  const updated = await contactRequestsRepo.setStatus(contactRequestId, "declined");
 
-  notificationsRepo.create({ userId: cr.payerId, type: "contact_declined", text: `Your contact request was declined and refunded.` });
+  await notificationsRepo.create({ userId: cr.payerId, type: "contact_declined", text: `Your contact request was declined and refunded.` });
   return updated;
 }
 
 export async function approveBumSession({ bumSessionId, actingUser }) {
-  const bs = bumSessionsRepo.findById(bumSessionId);
+  const bs = await bumSessionsRepo.findById(bumSessionId);
   if (!bs) throw new EscrowError("Live Bum session not found", 404);
   if (bs.creatorId !== actingUser.id) throw new EscrowError("Not your session to approve", 403);
   if (bs.status !== "paid_hold") throw new EscrowError(`Cannot approve a session in status '${bs.status}'`);
 
-  const payment = paymentsRepo.findByReference(bs.paystackReference);
+  const payment = await paymentsRepo.findByReference(bs.paystackReference);
   await releaseCreatorPayout({ creator: actingUser, payment });
-  const updated = bumSessionsRepo.setStatus(bumSessionId, "approved");
+  const updated = await bumSessionsRepo.setStatus(bumSessionId, "approved");
 
-  notificationsRepo.create({ userId: bs.payerId, type: "bum_approved", text: `${actingUser.name} confirmed your ${bs.mins}-min Live Bum session!` });
+  await notificationsRepo.create({ userId: bs.payerId, type: "bum_approved", text: `${actingUser.name} confirmed your ${bs.mins}-min Live Bum session!` });
   return updated;
 }
 
 export async function declineBumSession({ bumSessionId, actingUser }) {
-  const bs = bumSessionsRepo.findById(bumSessionId);
+  const bs = await bumSessionsRepo.findById(bumSessionId);
   if (!bs) throw new EscrowError("Live Bum session not found", 404);
   if (bs.creatorId !== actingUser.id) throw new EscrowError("Not your session to decline", 403);
   if (bs.status !== "paid_hold") throw new EscrowError(`Cannot decline a session in status '${bs.status}'`);
 
   await refundTransaction({ reference: bs.paystackReference, reason: "Live Bum session declined" });
-  const payment = paymentsRepo.findByReference(bs.paystackReference);
-  paymentsRepo.setRefundReference(payment.id, bs.paystackReference);
-  const updated = bumSessionsRepo.setStatus(bumSessionId, "declined");
+  const payment = await paymentsRepo.findByReference(bs.paystackReference);
+  await paymentsRepo.setRefundReference(payment.id, bs.paystackReference);
+  const updated = await bumSessionsRepo.setStatus(bumSessionId, "declined");
 
-  notificationsRepo.create({ userId: bs.payerId, type: "bum_declined", text: `Your Live Bum session request was declined and refunded.` });
+  await notificationsRepo.create({ userId: bs.payerId, type: "bum_declined", text: `Your Live Bum session request was declined and refunded.` });
   return updated;
 }
 
 export async function startBumSession({ bumSessionId, actingUser }) {
-  const bs = bumSessionsRepo.findById(bumSessionId);
+  const bs = await bumSessionsRepo.findById(bumSessionId);
   if (!bs) throw new EscrowError("Live Bum session not found", 404);
   if (![bs.payerId, bs.creatorId].includes(actingUser.id)) throw new EscrowError("Not a participant in this session", 403);
   if (bs.status !== "approved") throw new EscrowError(`Cannot start a session in status '${bs.status}'`);
@@ -237,7 +237,7 @@ export async function startBumSession({ bumSessionId, actingUser }) {
 }
 
 export async function endBumSession({ bumSessionId, actingUser }) {
-  const bs = bumSessionsRepo.findById(bumSessionId);
+  const bs = await bumSessionsRepo.findById(bumSessionId);
   if (!bs) throw new EscrowError("Live Bum session not found", 404);
   if (![bs.payerId, bs.creatorId].includes(actingUser.id)) throw new EscrowError("Not a participant in this session", 403);
   if (bs.status !== "active") throw new EscrowError(`Cannot end a session in status '${bs.status}'`);
@@ -257,29 +257,36 @@ export { EscrowError };
 // fields most likely to have shifted if Paystack's API has changed.
 
 export async function handleTransferSuccess(reference) {
-  const payment = paymentsRepo.findByPayoutReference(reference);
+  const payment = await paymentsRepo.findByPayoutReference(reference);
   if (!payment) return { handled: false, reason: "no matching payout" };
   if (payment.status !== "processing_payout") return { handled: false, reason: `already ${payment.status}` };
 
-  paymentsRepo.setStatus(payment.id, "released");
+  await paymentsRepo.setStatus(payment.id, "released");
   return { handled: true };
 }
 
 export async function handleTransferFailed(reference, failureReason) {
-  const payment = paymentsRepo.findByPayoutReference(reference);
+  const payment = await paymentsRepo.findByPayoutReference(reference);
   if (!payment) return { handled: false, reason: "no matching payout" };
   if (payment.status !== "processing_payout") return { handled: false, reason: `already ${payment.status}` };
 
-  paymentsRepo.setStatus(payment.id, "payout_failed");
+  await paymentsRepo.setStatus(payment.id, "payout_failed");
 
   // payment.userId is the PAYER — the payout that failed belongs to the
   // CREATOR, so look that up via the underlying domain object instead.
   let creatorId = null;
-  if (payment.kind === "contact") creatorId = contactRequestsRepo.findById(payment.refId)?.creatorId;
-  else if (payment.kind === "bum") creatorId = bumSessionsRepo.findById(payment.refId)?.creatorId;
-  else if (payment.kind === "bum_extend") {
-    const ext = bumExtensionsRepo.findById(payment.refId);
-    creatorId = ext ? bumSessionsRepo.findById(ext.bumSessionId)?.creatorId : null;
+  if (payment.kind === "contact") {
+    const cr = await contactRequestsRepo.findById(payment.refId);
+    creatorId = cr?.creatorId;
+  } else if (payment.kind === "bum") {
+    const bs = await bumSessionsRepo.findById(payment.refId);
+    creatorId = bs?.creatorId;
+  } else if (payment.kind === "bum_extend") {
+    const ext = await bumExtensionsRepo.findById(payment.refId);
+    if (ext) {
+      const bs = await bumSessionsRepo.findById(ext.bumSessionId);
+      creatorId = bs?.creatorId;
+    }
   }
 
   // The contact/Live Bum session was already marked "approved" and the payer
@@ -288,7 +295,7 @@ export async function handleTransferFailed(reference, failureReason) {
   // financial reconciliation case: the creator is owed money the platform
   // failed to deliver. Flagging both sides rather than pretending it didn't happen.
   if (creatorId) {
-    notificationsRepo.create({
+    await notificationsRepo.create({
       userId: creatorId,
       type: "payout_issue",
       text: `A payout to you (GHS ${payment.creatorCut.toFixed(2)}) failed (${failureReason || "unknown reason"}) — our team has been notified and will resolve this.`,
@@ -299,10 +306,10 @@ export async function handleTransferFailed(reference, failureReason) {
 }
 
 export async function handleRefundProcessed(transactionReference) {
-  const payment = paymentsRepo.findByReference(transactionReference);
+  const payment = await paymentsRepo.findByReference(transactionReference);
   if (!payment) return { handled: false, reason: "no matching payment" };
   if (payment.status !== "processing_refund") return { handled: false, reason: `already ${payment.status}` };
 
-  paymentsRepo.setStatus(payment.id, "refunded");
+  await paymentsRepo.setStatus(payment.id, "refunded");
   return { handled: true };
 }

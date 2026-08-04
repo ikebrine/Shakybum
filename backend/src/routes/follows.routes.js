@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { asyncHandler } from "../middleware/errorHandler.js";
 import { requireAuth } from "../middleware/authMiddleware.js";
 import { followsRepo } from "../repositories/social.js";
 import { usersRepo, toPublicUser } from "../repositories/users.js";
@@ -7,35 +8,37 @@ import { recomputeBadge } from "../services/badge.service.js";
 
 const router = Router();
 
-router.post("/:userId/follow", requireAuth, (req, res) => {
-  const target = usersRepo.findById(req.params.userId);
+router.post("/:userId/follow", requireAuth, asyncHandler(async (req, res) => {
+  const target = await usersRepo.findById(req.params.userId);
   if (!target) return res.status(404).json({ error: "User not found" });
   if (target.id === req.user.id) return res.status(400).json({ error: "Can't follow yourself" });
 
-  const added = followsRepo.follow(req.user.id, target.id);
+  const added = await followsRepo.follow(req.user.id, target.id);
   if (added) {
-    recomputeBadge(target.id); // follower count changed — may push the followee past a badge threshold
-    notificationsRepo.create({ userId: target.id, type: "new_follower", text: `${req.user.name} started following you.` });
+    await recomputeBadge(target.id); // follower count changed — may push the followee past a badge threshold
+    await notificationsRepo.create({ userId: target.id, type: "new_follower", text: `${req.user.name} started following you.` });
   }
-  res.json({ following: true, followerCount: followsRepo.followerCount(target.id) });
-});
+  res.json({ following: true, followerCount: await followsRepo.followerCount(target.id) });
+}));
 
-router.delete("/:userId/follow", requireAuth, (req, res) => {
-  const target = usersRepo.findById(req.params.userId);
+router.delete("/:userId/follow", requireAuth, asyncHandler(async (req, res) => {
+  const target = await usersRepo.findById(req.params.userId);
   if (!target) return res.status(404).json({ error: "User not found" });
 
-  followsRepo.unfollow(req.user.id, target.id);
-  recomputeBadge(target.id); // may drop the followee back below a threshold
-  res.json({ following: false, followerCount: followsRepo.followerCount(target.id) });
-});
+  await followsRepo.unfollow(req.user.id, target.id);
+  await recomputeBadge(target.id); // may drop the followee back below a threshold
+  res.json({ following: false, followerCount: await followsRepo.followerCount(target.id) });
+}));
 
-router.get("/:userId/followers", requireAuth, (req, res) => {
-  res.json({ followers: followsRepo.followers(req.params.userId).map((u) => toPublicUser(mapUserRow(u))) });
-});
+router.get("/:userId/followers", requireAuth, asyncHandler(async (req, res) => {
+  const rows = await followsRepo.followers(req.params.userId);
+  res.json({ followers: rows.map((u) => toPublicUser(mapUserRow(u))) });
+}));
 
-router.get("/:userId/following", requireAuth, (req, res) => {
-  res.json({ following: followsRepo.following(req.params.userId).map((u) => toPublicUser(mapUserRow(u))) });
-});
+router.get("/:userId/following", requireAuth, asyncHandler(async (req, res) => {
+  const rows = await followsRepo.following(req.params.userId);
+  res.json({ following: rows.map((u) => toPublicUser(mapUserRow(u))) });
+}));
 
 // followsRepo's joined queries return raw snake_case DB rows (not run through
 // usersRepo's toUser mapper) — this brings them into the same camelCase shape

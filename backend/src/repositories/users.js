@@ -34,53 +34,61 @@ export function toPublicUser(user) {
 }
 
 export const usersRepo = {
-  create({ email, handle, name, passwordHash }) {
+  async create({ email, handle, name, passwordHash }) {
     const id = newId("user");
-    db.prepare(
-      `INSERT INTO users (id, email, handle, name, password_hash) VALUES (?, ?, ?, ?, ?)`
-    ).run(id, email.toLowerCase(), handle.toLowerCase(), name, passwordHash);
+    await db.query(
+      `INSERT INTO users (id, email, handle, name, password_hash) VALUES ($1, $2, $3, $4, $5)`,
+      [id, email.toLowerCase(), handle.toLowerCase(), name, passwordHash]
+    );
     return this.findById(id);
   },
 
-  findById(id) {
-    return toUser(db.prepare(`SELECT * FROM users WHERE id = ?`).get(id));
+  async findById(id) {
+    const { rows } = await db.query(`SELECT * FROM users WHERE id = $1`, [id]);
+    return toUser(rows[0]);
   },
 
-  findByEmail(email) {
-    return toUser(db.prepare(`SELECT * FROM users WHERE email = ?`).get(email.toLowerCase()));
+  async findByEmail(email) {
+    const { rows } = await db.query(`SELECT * FROM users WHERE email = $1`, [email.toLowerCase()]);
+    return toUser(rows[0]);
   },
 
-  findByHandle(handle) {
-    return toUser(db.prepare(`SELECT * FROM users WHERE handle = ?`).get(handle.toLowerCase()));
+  async findByHandle(handle) {
+    const { rows } = await db.query(`SELECT * FROM users WHERE handle = $1`, [handle.toLowerCase()]);
+    return toUser(rows[0]);
   },
 
-  updateProfile(id, { name, bio, handle }) {
-    db.prepare(
-      `UPDATE users SET name = COALESCE(?, name), bio = COALESCE(?, bio), handle = COALESCE(?, handle), updated_at = datetime('now') WHERE id = ?`
-    ).run(name ?? null, bio ?? null, handle ? handle.toLowerCase() : null, id);
+  async updateProfile(id, { name, bio, handle }) {
+    await db.query(
+      `UPDATE users SET name = COALESCE($1, name), bio = COALESCE($2, bio), handle = COALESCE($3, handle), updated_at = now() WHERE id = $4`,
+      [name ?? null, bio ?? null, handle ? handle.toLowerCase() : null, id]
+    );
     return this.findById(id);
   },
 
-  updatePayoutDestination(id, { payoutPhone, payoutProvider, paystackRecipientCode }) {
-    db.prepare(
-      `UPDATE users SET payout_phone = ?, payout_provider = ?, paystack_recipient_code = ?, updated_at = datetime('now') WHERE id = ?`
-    ).run(payoutPhone, payoutProvider, paystackRecipientCode, id);
+  async updatePayoutDestination(id, { payoutPhone, payoutProvider, paystackRecipientCode }) {
+    await db.query(
+      `UPDATE users SET payout_phone = $1, payout_provider = $2, paystack_recipient_code = $3, updated_at = now() WHERE id = $4`,
+      [payoutPhone, payoutProvider, paystackRecipientCode, id]
+    );
     return this.findById(id);
   },
 
-  updateContactInfo(id, { contactEmail, contactPhone }) {
-    db.prepare(
-      `UPDATE users SET contact_email = ?, contact_phone = ?, updated_at = datetime('now') WHERE id = ?`
-    ).run(contactEmail, contactPhone, id);
+  async updateContactInfo(id, { contactEmail, contactPhone }) {
+    await db.query(
+      `UPDATE users SET contact_email = $1, contact_phone = $2, updated_at = now() WHERE id = $3`,
+      [contactEmail, contactPhone, id]
+    );
     return this.findById(id);
   },
 
-  updateBumEnabled(id, bumEnabled) {
-    db.prepare(`UPDATE users SET bum_enabled = ?, updated_at = datetime('now') WHERE id = ?`).run(bumEnabled ? 1 : 0, id);
+  async updateBumEnabled(id, bumEnabled) {
+    await db.query(`UPDATE users SET bum_enabled = $1, updated_at = now() WHERE id = $2`, [!!bumEnabled, id]);
     return this.findById(id);
   },
 
-  list({ limit = 50, offset = 0 } = {}) {
-    return db.prepare(`SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(limit, offset).map(toUser);
+  async list({ limit = 50, offset = 0 } = {}) {
+    const { rows } = await db.query(`SELECT * FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2`, [limit, offset]);
+    return rows.map(toUser);
   },
 };

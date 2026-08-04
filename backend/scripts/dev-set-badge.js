@@ -7,7 +7,7 @@
 //   node scripts/dev-set-badge.js amarabeats GoldQueen
 import "dotenv/config";
 import { usersRepo } from "../src/repositories/users.js";
-import { db } from "../src/db/index.js";
+import { db, pool } from "../src/db/index.js";
 
 const [, , handle, badge] = process.argv;
 const VALID = ["Newcomer", "RisingStar", "SilverQueen", "GoldQueen", "Platinum", "Diamond"];
@@ -17,11 +17,13 @@ if (!handle || !VALID.includes(badge)) {
   process.exit(1);
 }
 
-const user = usersRepo.findByHandle(handle);
+const user = await usersRepo.findByHandle(handle);
 if (!user) {
   console.error(`No user with handle "${handle}"`);
+  await pool.end();
   process.exit(1);
 }
 
-db.prepare(`UPDATE users SET badge = ? WHERE id = ?`).run(badge, user.id);
+await db.query(`UPDATE users SET badge = $1 WHERE id = $2`, [badge, user.id]);
 console.log(`${handle} is now ${badge}`);
+await pool.end();
