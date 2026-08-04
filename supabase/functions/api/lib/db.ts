@@ -39,4 +39,6 @@ export const db = {
 export async function migrate() {
   const { SCHEMA_SQL } = await import("./schema.ts");
   await pool.query(SCHEMA_SQL);
+  const { ensureVideosBucket } = await import("./storage.ts");
+  await ensureVideosBucket();
 }

@@ -48,7 +48,37 @@ Tables auto-create on cold start (`migrate()` runs the same
 `CREATE TABLE IF NOT EXISTS` schema as the Node version — safe to
 re-run every cold start).
 
-## Running tests
+## Video storage (Supabase Storage — no third-party service)
+
+`POST /api/media/upload` accepts a video (raw bytes, `Content-Type:
+video/webm|video/mp4|video/quicktime`, 100MB cap) from an authenticated
+user and stores it in **Supabase's own Storage product** — not S3,
+Cloudinary, or any other third party, specifically to keep the whole app
+at two services (Vercel + Supabase). Returns a real, permanent public URL.
+
+The `videos` storage bucket is created automatically on cold start
+(`ensureVideosBucket()` in `lib/db.ts`'s `migrate()`) — no manual dashboard
+step needed, same pattern as the database tables.
+
+**Credentials**: `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are
+commonly auto-injected into Supabase Edge Functions without needing
+`supabase secrets set` — this couldn't be verified against a live project
+from this dev sandbox (no network path to it). If video uploads fail with
+a "not set" error in your function logs, set them explicitly:
+```bash
+supabase secrets set SUPABASE_URL="https://<project-ref>.supabase.co"
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY="<from Project Settings → API → service_role>"
+```
+The service role key bypasses Row Level Security and must never reach the
+frontend — only this backend code calls Supabase Storage directly; the
+frontend uploads to *this* API (authenticated via the normal user JWT),
+never to Supabase directly.
+
+This closes what was previously a documented gap ("no media storage/CDN")
+— recorded/uploaded videos now persist permanently instead of vanishing
+as session-only Blob URLs on page reload.
+
+
 
 ```bash
 cd supabase/functions/api

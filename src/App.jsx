@@ -1773,7 +1773,8 @@ function MomoPaymentModal({amount=15,currency="GHS",purposeLabel="Unlock contact
 // ── VIDEO UPLOAD MODAL ──
 function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
   const [step,setStep]=useState("choose");
-  const [videoURL,setVideoURL]=useState(null);
+  const [videoURL,setVideoURL]=useState(null); // local blob: URL, used for preview only
+  const [uploadedUrl,setUploadedUrl]=useState(null); // real permanent URL from Supabase Storage, set after doUpload succeeds
   const [caption,setCaption]=useState("");
   const [moveTag,setMoveTag]=useState("");
   const [recTime,setRecTime]=useState(0);
@@ -1840,12 +1841,30 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
     setVideoURL(prev=>{if(prev&&prev.startsWith("blob:"))URL.revokeObjectURL(prev);return null;});
     setStep("choose");
   };
-  const doUpload=()=>{
+  const doUpload=async()=>{
     if(mode!=="profile"&&mode!=="short"&&!moveTag){showToast("Tag a move first! 💃");return;}
     const capFlag=scanContactInfo(caption);
     if(capFlag.flagged){showToast(`🚫 Caption can't include ${capFlag.reason}. Repeated attempts get you permanently banned — use paid Contact requests instead`);return;}
+    if(!videoURL){showToast("No video to upload");return;}
+
     setStep("uploading");setProg(0);
-    const iv=setInterval(()=>{setProg(p=>{const n=Math.min(100,p+Math.random()*14+5);if(n>=100){clearInterval(iv);setStep("done");}return n;});},180);
+    // fetch doesn't expose real upload-progress without XHR — this animates
+    // smoothly toward ~90% while the real upload is in flight, then jumps to
+    // 100% on actual success. The upload itself is real; only the progress
+    // bar's exact percentage during transit is approximated.
+    const progInterval=setInterval(()=>setProg(p=>p<90?p+Math.random()*8+2:p),220);
+    try{
+      const blob=await(await fetch(videoURL)).blob();
+      const{url}=await api.media.uploadVideo(blob);
+      clearInterval(progInterval);
+      setProg(100);
+      setUploadedUrl(url);
+      setStep("done");
+    }catch(err){
+      clearInterval(progInterval);
+      showToast(err?.message||"Upload failed — check your connection and try again");
+      setStep("preview");
+    }
   };
   useEffect(()=>()=>{
     clearInterval(timerRef.current);
@@ -1957,7 +1976,7 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
           <div style={{fontSize:72}}>🎉</div>
           <div style={{fontFamily:"'Pacifico',cursive",fontSize:24,color:C.text}}>{mode==="short"?"ShakyShort Live!":mode==="profile"?"Profile Set!":"Video Posted!"}</div>
           <div style={{fontSize:14,color:C.sub,lineHeight:1.7}}>{doneMsg}</div>
-          <button onClick={()=>{onDone&&onDone({videoURL,caption,moveTag});onClose();}} style={{width:"100%",background:"linear-gradient(135deg,#FF3CAC,#A855F7)",border:"none",borderRadius:14,padding:"13px",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",maxWidth:280}}>Done 🍑</button>
+          <button onClick={()=>{onDone&&onDone({videoURL:uploadedUrl,caption,moveTag});onClose();}} style={{width:"100%",background:"linear-gradient(135deg,#FF3CAC,#A855F7)",border:"none",borderRadius:14,padding:"13px",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",maxWidth:280}}>Done 🍑</button>
         </div>
       )}
     </div>

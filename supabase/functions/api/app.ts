@@ -16,6 +16,7 @@ import notificationsRoutes from "./routes/notifications.routes.ts";
 import postsRoutes from "./routes/posts.routes.ts";
 import followsRoutes from "./routes/follows.routes.ts";
 import challengesRoutes from "./routes/challenges.routes.ts";
+import mediaRoutes from "./routes/media.routes.ts";
 import { paymentLimiter } from "./middleware/rateLimit.ts";
 
 // Runs on cold start; CREATE TABLE IF NOT EXISTS is idempotent so this is
@@ -44,6 +45,7 @@ inner.route("/webhooks", paymentsRoutes);
 inner.route("/notifications", notificationsRoutes);
 inner.route("/posts", postsRoutes);
 inner.route("/challenges", challengesRoutes);
+inner.route("/media", mediaRoutes);
 
 inner.notFound((c) => c.json({ error: "Not found" }, 404));
 

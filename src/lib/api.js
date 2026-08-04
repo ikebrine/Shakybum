@@ -124,6 +124,26 @@ export const api = {
     list: () => request("GET", "/notifications"),
     markRead: (id) => request("POST", `/notifications/${id}/read`),
   },
+  media: {
+    // Raw binary upload — doesn't go through request() since that always
+    // sends JSON. Returns a real, permanent URL (Supabase Storage) instead
+    // of the session-only blob: URL the recorder produces locally.
+    uploadVideo: async (blob) => {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/media/upload`, {
+        method: "POST",
+        headers: {
+          "Content-Type": blob.type || "video/webm",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: blob,
+      });
+      let json = null;
+      try { json = await res.json(); } catch { /* empty body */ }
+      if (!res.ok) throw new ApiError(json?.error || `Upload failed (${res.status})`, res.status);
+      return json; // { url }
+    },
+  },
 };
 
 /**
