@@ -4,15 +4,11 @@ import { newId } from "./id.ts";
 // of the same project/dashboard) — deliberately NOT a third-party service
 // like S3/Cloudinary/Mux, to keep the whole stack at Vercel + Supabase.
 //
-// SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are commonly auto-injected
-// into Supabase Edge Functions without needing `supabase secrets set` —
-// unlike DATABASE_URL, which isn't. That auto-injection couldn't be
-// verified against a live project from this dev sandbox (no network path
-// to it); if uploads fail with a missing-credentials error, set these
-// explicitly:
-//   supabase secrets set SUPABASE_URL="https://<project-ref>.supabase.co"
-//   supabase secrets set SUPABASE_SERVICE_ROLE_KEY="<service role key from Project Settings > API>"
-//
+// SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are auto-injected into
+// Supabase Edge Functions — confirmed: `supabase secrets set` actively
+// refuses to let you set anything prefixed SUPABASE_ ("Env name cannot
+// start with SUPABASE_, skipping"), which is the platform protecting its
+// own reserved/auto-provided values. No manual setup needed for these two.
 // The service role key bypasses Row Level Security — it must NEVER be sent
 // to the frontend. The frontend uploads a video to OUR backend (which
 // requires a valid user JWT via requireAuth), and only this backend code

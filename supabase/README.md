@@ -61,14 +61,12 @@ The `videos` storage bucket is created automatically on cold start
 step needed, same pattern as the database tables.
 
 **Credentials**: `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are
-commonly auto-injected into Supabase Edge Functions without needing
-`supabase secrets set` — this couldn't be verified against a live project
-from this dev sandbox (no network path to it). If video uploads fail with
-a "not set" error in your function logs, set them explicitly:
-```bash
-supabase secrets set SUPABASE_URL="https://<project-ref>.supabase.co"
-supabase secrets set SUPABASE_SERVICE_ROLE_KEY="<from Project Settings → API → service_role>"
-```
+auto-injected into Supabase Edge Functions — **confirmed**, not just
+assumed: `supabase secrets set` actively refuses to let you set anything
+prefixed `SUPABASE_` ("Env name cannot start with SUPABASE_, skipping"),
+which is the platform protecting its own reserved/auto-provided values.
+No manual setup needed for these two.
+
 The service role key bypasses Row Level Security and must never reach the
 frontend — only this backend code calls Supabase Storage directly; the
 frontend uploads to *this* API (authenticated via the normal user JWT),
