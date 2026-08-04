@@ -11,6 +11,7 @@ function toUser(row: any) {
     passwordHash: row.password_hash,
     bio: row.bio,
     avatarEmoji: row.avatar_emoji,
+    videoUrl: row.video_url,
     badge: row.badge,
     bumEnabled: !!row.bum_enabled,
     allowDownload: !!row.allow_download,
@@ -58,10 +59,10 @@ export const usersRepo = {
     return toUser(rows[0]);
   },
 
-  async updateProfile(id: string, { name, bio, handle }: { name?: string; bio?: string; handle?: string }) {
+  async updateProfile(id: string, { name, bio, handle, videoUrl }: { name?: string; bio?: string; handle?: string; videoUrl?: string }) {
     await db.query(
-      `UPDATE users SET name = COALESCE($1, name), bio = COALESCE($2, bio), handle = COALESCE($3, handle), updated_at = now() WHERE id = $4`,
-      [name ?? null, bio ?? null, handle ? handle.toLowerCase() : null, id]
+      `UPDATE users SET name = COALESCE($1, name), bio = COALESCE($2, bio), handle = COALESCE($3, handle), video_url = COALESCE($4, video_url), updated_at = now() WHERE id = $5`,
+      [name ?? null, bio ?? null, handle ? handle.toLowerCase() : null, videoUrl ?? null, id]
     );
     return this.findById(id);
   },

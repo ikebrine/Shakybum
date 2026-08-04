@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash           TEXT NOT NULL,
   bio                     TEXT NOT NULL DEFAULT '',
   avatar_emoji            TEXT NOT NULL DEFAULT '💃',
+  video_url               TEXT,
   badge                   TEXT NOT NULL DEFAULT 'Newcomer',
   bum_enabled             BOOLEAN NOT NULL DEFAULT false,
   allow_download          BOOLEAN NOT NULL DEFAULT true,
@@ -29,6 +30,10 @@ CREATE TABLE IF NOT EXISTS users (
   created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- CREATE TABLE IF NOT EXISTS is a no-op against an already-existing table
+-- (like the live database, which predates this column) — this handles
+-- that case so migrate() stays correctly idempotent either way.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS video_url TEXT;
 
 CREATE TABLE IF NOT EXISTS contact_requests (
   id                 TEXT PRIMARY KEY,

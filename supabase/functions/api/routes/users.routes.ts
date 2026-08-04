@@ -41,7 +41,7 @@ app.get("/:handle", requireAuth, async (c) => {
 
 app.patch("/me", requireAuth, async (c) => {
   const me = c.get("user");
-  const { name, bio, handle } = await c.req.json();
+  const { name, bio, handle, videoUrl } = await c.req.json();
 
   if (bio !== undefined) {
     const flag = scanContactInfo(bio);
@@ -53,8 +53,14 @@ app.patch("/me", requireAuth, async (c) => {
     const existing = await usersRepo.findByHandle(handle);
     if (existing && existing.id !== me.id) return c.json({ error: "Handle already taken" }, 409);
   }
+  // videoUrl should only ever be a URL our own /media/upload endpoint just
+  // returned — this isn't arbitrary user text, so no contact-info scan
+  // needed here, just a sanity check it's actually a URL and not junk.
+  if (videoUrl !== undefined && videoUrl !== null && !/^https?:\/\//.test(videoUrl)) {
+    return c.json({ error: "videoUrl must be a valid URL" }, 400);
+  }
 
-  const updated = await usersRepo.updateProfile(me.id, { name, bio, handle });
+  const updated = await usersRepo.updateProfile(me.id, { name, bio, handle, videoUrl });
   return c.json({ user: toPublicUser(updated) });
 });
 

@@ -2888,14 +2888,22 @@ function MainApp() {
       {/* Modals — layered by z-index */}
       {profileVideoUser&&<ProfileVideoModal user={profileVideoUser} onClose={()=>setProfileVideoUser(null)}/>}
       {profileUser&&<UserSheet user={profileUser} onClose={()=>setProfileUser(null)} openProfile={openProfile} {...shared}/>}
-      {showUpload&&<VideoUploadModal mode={showUpload} onClose={()=>setShowUpload(null)} onDone={({videoURL,caption,moveTag})=>{
+      {showUpload&&<VideoUploadModal mode={showUpload} onClose={()=>setShowUpload(null)} onDone={async({videoURL,caption,moveTag})=>{
         if(showUpload==="profile"){
           // ME is a module-level mutable object (see the login-flow comment
-          // near ShakybumApp for why) — mutate in place, then bump a state
-          // counter so every component reading ME re-renders with the new value.
+          // near ShakybumApp for why) — mutate in place immediately so the
+          // UI updates without waiting on the network, then persist to the
+          // backend so it survives a reload (this is the actual fix — the
+          // previous version only ever did the local mutation below, which
+          // is exactly why it kept vanishing on refresh).
           ME.videoUrl=videoURL;
           setMeVersion(v=>v+1);
-          showToast("Profile video saved! 💃");
+          try{
+            await api.users.updateProfile({videoUrl:videoURL});
+            showToast("Profile video saved! 💃");
+          }catch(err){
+            showToast(err?.message||"Video shows now, but couldn't save — try again or it may not survive a reload");
+          }
         }else if(showUpload==="short"){
           setShorts(p=>[{id:Date.now(),userId:ME.id,videoUrl:videoURL,caption,timeAgo:"now"},...p]);
           showToast("ShakyShort posted! ⚡");

@@ -64,6 +64,7 @@ export function mapUser(u) {
     avatar: (u.name || "?")[0].toUpperCase(),
     color: "#FF3CAC",
     badge: badgeToFrontend(u.badge),
+    videoUrl: u.videoUrl || null,
     bumEnabled: !!u.bumEnabled,
     allowDownload: u.allowDownload !== false,
     moves: u.movesCount ?? 0,
