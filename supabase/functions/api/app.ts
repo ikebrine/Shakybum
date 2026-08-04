@@ -32,6 +32,19 @@ await migrate();
 // `/functions/v1/api`, so requests match correctly either way.
 const inner = new Hono<AppEnv>();
 
+// TEMPORARY DIAGNOSTIC — logs every incoming request's raw method/URL before
+// any routing happens, so this shows up in Supabase's function logs
+// regardless of whether our route-matching logic is even correct. If this
+// log line itself never appears for a real request, that tells us the
+// request isn't reaching app.fetch at all (a Deno.serve/gateway issue, not
+// a routing issue) — if it DOES appear, the logged URL tells us exactly
+// what path Supabase actually forwards, which is the piece we've had to
+// guess at so far. Remove once the live 404 is resolved.
+inner.use("*", async (c, next) => {
+  console.log(`[DIAGNOSTIC] ${c.req.method} ${c.req.url}`);
+  await next();
+});
+
 inner.use("*", cors({ origin: Deno.env.get("CORS_ORIGIN") || "*" }));
 
 inner.get("/health", (c) => c.json({ ok: true }));
