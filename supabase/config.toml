@@ -1,0 +1,8 @@
+project_id = "shakybum"
+
+[functions.api]
+# We issue and verify our own JWTs (see lib/auth.ts) — not Supabase Auth's.
+# Supabase's platform-level JWT check would otherwise intercept/reject our
+# custom Authorization: Bearer <token> header before it ever reaches our
+# Hono app's own auth middleware.
+verify_jwt = false
