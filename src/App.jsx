@@ -135,7 +135,7 @@ const INIT_USERS=[
   {id:5,name:"Isla Thompson", handle:"islandvibe",avatar:"I",color:"#F72585",bio:"Dancehall 🎵",       moves:22,followers:2340,following:290,badge:"Gold Queen",   contact:"isla@gmail.com", phone:"+44 7700 900005",bumEnabled:true, online:true, allowDownload:false},
   {id:6,name:"Ama Boateng",   handle:"afrogyal",  avatar:"A",color:"#7FFF00",bio:"Dance is therapy 💚",moves:9, followers:670, following:410,badge:"Rising Star", contact:"ama@gmail.com",  phone:"+44 7700 900006",bumEnabled:false,online:false,allowDownload:true},
 ];
-const ME={id:0,name:"ShakyStar",handle:"shakystar",avatar:"💃",color:"#FF3CAC",bio:"Waist moves only 🔥",moves:12,followers:1200,following:88,badge:"Gold Queen",bumEnabled:true,allowDownload:true};
+const ME={id:0,name:"ShakyStar",handle:"shakystar",avatar:"💃",color:"#FF3CAC",bio:"Waist moves only 🔥",moves:12,followers:1200,following:88,badge:"Gold Queen",bumEnabled:true,allowDownload:true,videoUrl:null};
 
 const MOVES=[
   {id:1,name:"Waist Wine",    cat:"Afrobeats",  emoji:"🌀",level:"Beginner",    likes:2341,creator:INIT_USERS[0]},
@@ -222,7 +222,9 @@ function VideoAvatar({user,size=44,isLive=false,onClick,showVideo=false}) {
     <div onClick={onClick} style={{position:"relative",flexShrink:0,width:size,height:size,cursor:onClick?"pointer":"default"}}>
       <div style={{position:"absolute",inset:-2.5,borderRadius:"50%",background:isLive?"linear-gradient(135deg,#FF3B5C,#FF9A76)":"linear-gradient(135deg,#FF3CAC,#A855F7)",zIndex:0}}/>
       <div style={{position:"absolute",inset:0,borderRadius:"50%",overflow:"hidden",border:`2px solid ${C.bg}`,zIndex:1,background:`linear-gradient(135deg,${user.color}30,${user.color}10)`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:user.color,fontSize:size*.38}}>
-        {showVideo?<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.5,animation:"wiggle 2s ease-in-out infinite"}}>{user.avatar}</div>:<span>{user.avatar}</span>}
+        {showVideo&&user.videoUrl?<video src={user.videoUrl} autoPlay muted loop playsInline style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+          :showVideo?<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.5,animation:"wiggle 2s ease-in-out infinite"}}>{user.avatar}</div>
+          :<span>{user.avatar}</span>}
       </div>
       {user.online&&!isLive&&<div style={{position:"absolute",bottom:1,right:1,width:Math.max(8,size*.18),height:Math.max(8,size*.18),borderRadius:"50%",background:C.green,border:`2px solid ${C.bg}`,zIndex:2}}/>}
       {isLive&&<div style={{position:"absolute",bottom:-5,left:"50%",transform:"translateX(-50%)",background:"#FF3B5C",borderRadius:6,padding:"2px 5px",fontSize:7,fontWeight:800,color:"#fff",border:`1.5px solid ${C.bg}`,whiteSpace:"nowrap",zIndex:2,display:"flex",alignItems:"center",gap:2}}><span className="live-flash">●</span>LIVE</div>}
@@ -237,11 +239,15 @@ function ProfileVideoModal({user,onClose}) {
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.95)",zIndex:999,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",maxWidth:390,margin:"0 auto"}} onClick={onClose}>
       <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:390,display:"flex",flexDirection:"column",alignItems:"center",gap:16,padding:"0 20px"}}>
         <div style={{width:"100%",aspectRatio:"9/16",borderRadius:20,overflow:"hidden",background:"linear-gradient(135deg,#1a0d2e,#0e0718)",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",border:`2px solid ${user.color}55`,maxHeight:480}}>
-          <div style={{textAlign:"center"}}>
-            <div style={{fontSize:100,animation:"wiggle 2s ease-in-out infinite"}}>{user.avatar}</div>
-            <div style={{fontSize:14,color:C.sub,marginTop:12}}>@{user.handle}'s dance profile</div>
-            <div style={{fontSize:12,color:C.sub,marginTop:4,opacity:.6}}>Video profile plays here</div>
-          </div>
+          {user.videoUrl?(
+            <video src={user.videoUrl} autoPlay loop controls playsInline style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+          ):(
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:100,animation:"wiggle 2s ease-in-out infinite"}}>{user.avatar}</div>
+              <div style={{fontSize:14,color:C.sub,marginTop:12}}>@{user.handle}'s dance profile</div>
+              <div style={{fontSize:12,color:C.sub,marginTop:4,opacity:.6}}>No profile video yet</div>
+            </div>
+          )}
           <VideoWatermark/>
           <div style={{position:"absolute",top:12,left:12}}><span style={{background:`${user.color}33`,border:`1px solid ${user.color}66`,borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,color:user.color}}>{user.badge}</span></div>
         </div>
@@ -1325,7 +1331,7 @@ function ProfileTab({showToast,setShowUpload,setShowAdmin,setShowSettings,setSho
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:14}}>
           <div style={{position:"relative"}}>
             <div onClick={()=>setShowUpload("profile")} style={{width:80,height:80,borderRadius:"50%",background:"linear-gradient(135deg,#FF3CAC,#A855F7)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:38,border:`3px solid ${C.bg}`,boxShadow:"0 4px 20px rgba(255,60,172,0.45)",overflow:"hidden",cursor:"pointer",position:"relative"}}>
-              <span style={{animation:"wiggle 2.5s ease-in-out infinite",display:"inline-block"}}>💃</span>
+              {ME.videoUrl?<video src={ME.videoUrl} autoPlay muted loop playsInline style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{animation:"wiggle 2.5s ease-in-out infinite",display:"inline-block"}}>💃</span>}
               <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0)",display:"flex",alignItems:"flex-end",justifyContent:"center",paddingBottom:4}}>
                 <div style={{background:"rgba(0,0,0,0.6)",borderRadius:6,padding:"2px 8px",fontSize:9,color:"#fff",fontWeight:700}}>🎬 Edit</div>
               </div>
@@ -1951,7 +1957,7 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
           <div style={{fontSize:72}}>🎉</div>
           <div style={{fontFamily:"'Pacifico',cursive",fontSize:24,color:C.text}}>{mode==="short"?"ShakyShort Live!":mode==="profile"?"Profile Set!":"Video Posted!"}</div>
           <div style={{fontSize:14,color:C.sub,lineHeight:1.7}}>{doneMsg}</div>
-          <button onClick={()=>{onDone&&onDone();onClose();}} style={{width:"100%",background:"linear-gradient(135deg,#FF3CAC,#A855F7)",border:"none",borderRadius:14,padding:"13px",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",maxWidth:280}}>Done 🍑</button>
+          <button onClick={()=>{onDone&&onDone({videoURL,caption,moveTag});onClose();}} style={{width:"100%",background:"linear-gradient(135deg,#FF3CAC,#A855F7)",border:"none",borderRadius:14,padding:"13px",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",maxWidth:280}}>Done 🍑</button>
         </div>
       )}
     </div>
@@ -2612,6 +2618,7 @@ function MainApp() {
   const [profileUser,setProfileUser]=useState(null);
   const [profileVideoUser,setProfileVideoUser]=useState(null);
   const [showUpload,setShowUpload]=useState(null);
+  const [meVersion,setMeVersion]=useState(0); // bumped after mutating ME in place (e.g. profile video), forces reads of ME to re-render
   const [showLive,setShowLive]=useState(false);
   const [showNotifs,setShowNotifs]=useState(false);
   const [showAdmin,setShowAdmin]=useState(false);
@@ -2862,7 +2869,22 @@ function MainApp() {
       {/* Modals — layered by z-index */}
       {profileVideoUser&&<ProfileVideoModal user={profileVideoUser} onClose={()=>setProfileVideoUser(null)}/>}
       {profileUser&&<UserSheet user={profileUser} onClose={()=>setProfileUser(null)} openProfile={openProfile} {...shared}/>}
-      {showUpload&&<VideoUploadModal mode={showUpload} onClose={()=>setShowUpload(null)} onDone={()=>{}} showToast={showToast}/>}
+      {showUpload&&<VideoUploadModal mode={showUpload} onClose={()=>setShowUpload(null)} onDone={({videoURL,caption,moveTag})=>{
+        if(showUpload==="profile"){
+          // ME is a module-level mutable object (see the login-flow comment
+          // near ShakybumApp for why) — mutate in place, then bump a state
+          // counter so every component reading ME re-renders with the new value.
+          ME.videoUrl=videoURL;
+          setMeVersion(v=>v+1);
+          showToast("Profile video saved! 💃");
+        }else if(showUpload==="short"){
+          setShorts(p=>[{id:Date.now(),userId:ME.id,videoUrl:videoURL,caption,timeAgo:"now"},...p]);
+          showToast("ShakyShort posted! ⚡");
+        }else{
+          setPosts(p=>[{id:Date.now(),userId:ME.id,move:moveTag,caption,videoUrl:videoURL,likes:0,comments:[],timeAgo:"now"},...p]);
+          showToast("Video posted! 🔥");
+        }
+      }} showToast={showToast}/>}
       {showLive&&<LiveModal onClose={()=>setShowLive(false)} showToast={showToast}/>}
       {showNotifs&&<NotifScreen notifs={notifs} setNotifs={setNotifs} onClose={()=>setShowNotifs(false)}/>}
       {showAdmin&&<AdminPanel onClose={()=>setShowAdmin(false)} users={users} showToast={showToast}/>}
