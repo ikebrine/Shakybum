@@ -23,37 +23,39 @@ import { paymentLimiter } from "./middleware/rateLimit.ts";
 // one-time migration step.
 await migrate();
 
-// Supabase Edge Functions are invoked at the full path
-// /functions/v1/<function-name>/... — basePath mirrors that so route
-// definitions below can stay clean ("/auth/signup" etc). The frontend's
-// VITE_API_BASE_URL should be set to
-// https://<project-ref>.supabase.co/functions/v1/api
-const app = new Hono<AppEnv>().basePath("/functions/v1/api");
+// Supabase Edge Functions' exact request-path behavior (whether the
+// /functions/v1/<function-name> prefix is stripped before your code sees
+// it, or passed through) isn't something this sandbox can verify against a
+// real deployed project — it's undocumented/has varied across Supabase
+// runtime versions. Rather than bet on one behavior, routes are defined
+// once on `inner` (bare paths, no prefix) and mounted at BOTH `/` and
+// `/functions/v1/api`, so requests match correctly either way.
+const inner = new Hono<AppEnv>();
 
-app.use("*", cors({ origin: Deno.env.get("CORS_ORIGIN") || "*" }));
+inner.use("*", cors({ origin: Deno.env.get("CORS_ORIGIN") || "*" }));
 
-app.get("/health", (c) => c.json({ ok: true }));
+inner.get("/health", (c) => c.json({ ok: true }));
 
-app.route("/auth", authRoutes);
-app.route("/users", usersRoutes);
-app.route("/users", followsRoutes); // /users/:userId/follow etc — shares the /users prefix
-app.use("/contact-requests/*", paymentLimiter);
-app.route("/contact-requests", contactRoutes);
-app.use("/bum-sessions/*", paymentLimiter);
-app.route("/bum-sessions", bumRoutes);
-app.route("/chat", chatRoutes);
-app.route("/webhooks", paymentsRoutes);
-app.route("/notifications", notificationsRoutes);
-app.route("/posts", postsRoutes);
-app.route("/challenges", challengesRoutes);
+inner.route("/auth", authRoutes);
+inner.route("/users", usersRoutes);
+inner.route("/users", followsRoutes); // /users/:userId/follow etc — shares the /users prefix
+inner.use("/contact-requests/*", paymentLimiter);
+inner.route("/contact-requests", contactRoutes);
+inner.use("/bum-sessions/*", paymentLimiter);
+inner.route("/bum-sessions", bumRoutes);
+inner.route("/chat", chatRoutes);
+inner.route("/webhooks", paymentsRoutes);
+inner.route("/notifications", notificationsRoutes);
+inner.route("/posts", postsRoutes);
+inner.route("/challenges", challengesRoutes);
 
-app.notFound((c) => c.json({ error: "Not found" }, 404));
+inner.notFound((c) => c.json({ error: "Not found" }, 404));
 
 // Central error handler — mirrors the Node backend's middleware/errorHandler.js.
 // EscrowError carries its own HTTP status (403/404/409 etc, thrown from
 // services/escrow.service.ts); anything else is an unexpected 500, logged
 // server-side but not leaked to the client.
-app.onError((err, c) => {
+inner.onError((err, c) => {
   if (err instanceof EscrowError) {
     return c.json({ error: err.message }, err.status as any);
   }
@@ -63,6 +65,10 @@ app.onError((err, c) => {
   console.error(err);
   return c.json({ error: "Internal server error" }, 500);
 });
+
+const app = new Hono<AppEnv>();
+app.route("/", inner);
+app.route("/functions/v1/api", inner);
 
 // Only start listening when run directly (`deno run index.ts`), not when
 // imported by the test suite — Hono's app.request() tests the app
