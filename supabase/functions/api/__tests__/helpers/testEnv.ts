@@ -48,7 +48,7 @@ export async function setupTestEnv(opts: { autoSucceed?: boolean; delayMs?: numb
   // at import time) but BEFORE we know the mock's port — lib/paystack.ts
   // reads PAYSTACK_BASE_URL lazily inside its functions specifically so
   // this ordering works.
-  const { default: app } = await import("../../index.ts");
+  const { default: app } = await import("../../app.ts");
 
   const appServer = Deno.serve({ port: 0, onListen: () => {} }, app.fetch);
   const appPort = (appServer.addr as Deno.NetAddr).port;
