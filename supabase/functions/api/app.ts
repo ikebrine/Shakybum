@@ -23,27 +23,10 @@ import { paymentLimiter } from "./middleware/rateLimit.ts";
 // one-time migration step.
 await migrate();
 
-// Supabase Edge Functions' exact request-path behavior (whether the
-// /functions/v1/<function-name> prefix is stripped before your code sees
-// it, or passed through) isn't something this sandbox can verify against a
-// real deployed project — it's undocumented/has varied across Supabase
-// runtime versions. Rather than bet on one behavior, routes are defined
-// once on `inner` (bare paths, no prefix) and mounted at BOTH `/` and
-// `/functions/v1/api`, so requests match correctly either way.
+// Routes are defined once on `inner` (bare paths, no prefix) and mounted
+// at multiple prefixes on the exported `app` below — see that mounting
+// block for the confirmed (not guessed) routing behavior.
 const inner = new Hono<AppEnv>();
-
-// TEMPORARY DIAGNOSTIC — logs every incoming request's raw method/URL before
-// any routing happens, so this shows up in Supabase's function logs
-// regardless of whether our route-matching logic is even correct. If this
-// log line itself never appears for a real request, that tells us the
-// request isn't reaching app.fetch at all (a Deno.serve/gateway issue, not
-// a routing issue) — if it DOES appear, the logged URL tells us exactly
-// what path Supabase actually forwards, which is the piece we've had to
-// guess at so far. Remove once the live 404 is resolved.
-inner.use("*", async (c, next) => {
-  console.log(`[DIAGNOSTIC] ${c.req.method} ${c.req.url}`);
-  await next();
-});
 
 inner.use("*", cors({ origin: Deno.env.get("CORS_ORIGIN") || "*" }));
 
@@ -80,7 +63,14 @@ inner.onError((err, c) => {
 });
 
 const app = new Hono<AppEnv>();
+// Confirmed via diagnostic logging against the real deployment: Supabase
+// strips the /functions/v1 gateway prefix but keeps the function's own
+// name (/api) as part of the path handed to our code — neither of the
+// two earlier guesses (full path preserved, or prefix fully stripped to
+// bare paths) was exactly right. Mounting at all three keeps this working
+// regardless of naming/runtime-version quirks going forward.
 app.route("/", inner);
+app.route("/api", inner);
 app.route("/functions/v1/api", inner);
 
 export default app;
