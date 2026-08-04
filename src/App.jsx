@@ -1855,12 +1855,15 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
     const progInterval=setInterval(()=>setProg(p=>p<90?p+Math.random()*8+2:p),220);
     try{
       const blob=await(await fetch(videoURL)).blob();
+      console.log("[upload diagnostic] blob type:",blob.type,"size:",blob.size,"bytes");
       const{url}=await api.media.uploadVideo(blob);
+      console.log("[upload diagnostic] backend returned url:",url);
       clearInterval(progInterval);
       setProg(100);
       setUploadedUrl(url);
       setStep("done");
     }catch(err){
+      console.error("[upload diagnostic] upload failed:",err);
       clearInterval(progInterval);
       showToast(err?.message||"Upload failed — check your connection and try again");
       setStep("preview");
@@ -2890,6 +2893,7 @@ function MainApp() {
       {profileUser&&<UserSheet user={profileUser} onClose={()=>setProfileUser(null)} openProfile={openProfile} {...shared}/>}
       {showUpload&&<VideoUploadModal mode={showUpload} onClose={()=>setShowUpload(null)} onDone={async({videoURL,caption,moveTag})=>{
         if(showUpload==="profile"){
+          console.log("[upload diagnostic] persisting profile videoUrl:",videoURL);
           // ME is a module-level mutable object (see the login-flow comment
           // near ShakybumApp for why) — mutate in place immediately so the
           // UI updates without waiting on the network, then persist to the
@@ -2899,9 +2903,11 @@ function MainApp() {
           ME.videoUrl=videoURL;
           setMeVersion(v=>v+1);
           try{
-            await api.users.updateProfile({videoUrl:videoURL});
+            const res=await api.users.updateProfile({videoUrl:videoURL});
+            console.log("[upload diagnostic] PATCH /users/me response:",res);
             showToast("Profile video saved! 💃");
           }catch(err){
+            console.error("[upload diagnostic] PATCH /users/me failed:",err);
             showToast(err?.message||"Video shows now, but couldn't save — try again or it may not survive a reload");
           }
         }else if(showUpload==="short"){
