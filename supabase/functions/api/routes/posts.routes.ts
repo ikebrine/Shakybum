@@ -21,14 +21,16 @@ app.post("/", requireAuth, async (c) => {
 });
 
 app.get("/", requireAuth, async (c) => {
+  const me = c.get("user");
   const kind = c.req.query("kind") === "short" ? "short" : "post";
   const limit = Math.min(Number(c.req.query("limit")) || 30, 100);
-  return c.json({ posts: await postsRepo.feed({ kind, limit, before: c.req.query("before") }) });
+  return c.json({ posts: await postsRepo.feed({ kind, limit, before: c.req.query("before"), viewerId: me.id }) });
 });
 
 app.get("/user/:userId", requireAuth, async (c) => {
+  const me = c.get("user");
   const kind = c.req.query("kind");
-  return c.json({ posts: await postsRepo.byUser(c.req.param("userId") ?? "", { kind }) });
+  return c.json({ posts: await postsRepo.byUser(c.req.param("userId") ?? "", { kind, viewerId: me.id }) });
 });
 
 app.get("/:id", requireAuth, async (c) => {
@@ -50,8 +52,8 @@ app.post("/:id/like", requireAuth, async (c) => {
   const me = c.get("user");
   const post = await postsRepo.findById(c.req.param("id") ?? "");
   if (!post) return c.json({ error: "Not found" }, 404);
-  await likesRepo.add(post.id, me.id);
-  return c.json({ post: await postsRepo.findById(post.id) });
+  await likesRepo.add(post.id, me.id); // idempotent — liking twice is a no-op, not an error
+  return c.json({ post: await postsRepo.findById(post.id), likedByMe: true });
 });
 
 app.delete("/:id/like", requireAuth, async (c) => {
@@ -59,7 +61,7 @@ app.delete("/:id/like", requireAuth, async (c) => {
   const post = await postsRepo.findById(c.req.param("id") ?? "");
   if (!post) return c.json({ error: "Not found" }, 404);
   await likesRepo.remove(post.id, me.id);
-  return c.json({ post: await postsRepo.findById(post.id) });
+  return c.json({ post: await postsRepo.findById(post.id), likedByMe: false });
 });
 
 app.get("/:id/comments", requireAuth, async (c) => {

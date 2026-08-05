@@ -55,6 +55,18 @@ const LIVE_OK=["Gold Queen","Platinum","Diamond"];
 // creators command a higher unlock price. Server should be the source of truth for this
 // in production; this map is UI-only.
 const CONTACT_PRICE={"Newcomer":5,"Rising Star":8,"Silver Queen":12,"Gold Queen":15,"Platinum":25,"Diamond":40};
+// Maps a backend post {id,userId,videoUrl,caption,moveTag,kind,likesCount,
+// commentsCount,createdAt,likedByMe} into the shape the existing feed/short
+// rendering code expects. Real comments are fetched lazily (on expand),
+// not embedded here — commentsCount is just the number for the badge.
+function mapPost(p){
+  return{
+    id:p.id,userId:p.userId,move:p.moveTag,caption:p.caption,
+    likes:p.likesCount??0,comments:[],commentsCount:p.commentsCount??0,
+    timeAgo:timeAgo(p.createdAt),videoUrl:p.videoUrl,likedByMe:!!p.likedByMe,
+    kind:p.kind,duration:15,emoji:"💃", // duration/emoji: ShakyShorts' fallback decorative fields, kept for backward compat with that component's rendering
+  };
+}
 const priceFor=user=>CONTACT_PRICE[user?.badge]||10;
 // Formats a backend "YYYY-MM-DD HH:MM:SS" (SQLite) or ISO timestamp as
 // relative time ("2m", "3h", "5d") for notification/activity displays.
@@ -728,10 +740,18 @@ function ShakyShorts({users,shorts,setShorts,liked,setLiked,showToast,setShowUpl
     return()=>clearInterval(progRef.current);
   },[activeIdx,shorts.length]);
 
-  const toggleLike=id=>{
+  const toggleLike=async id=>{
     const key=`short_${id}`;
-    setLiked(p=>({...p,[key]:!p[key]}));
-    setShorts(p=>p.map(s=>s.id===id?{...s,likes:s.likes+(liked[`short_${id}`]?-1:1)}:s));
+    const was=liked[key];
+    setLiked(p=>({...p,[key]:!was}));
+    setShorts(p=>p.map(s=>s.id===id?{...s,likes:s.likes+(was?-1:1)}:s));
+    try{
+      await(was?api.posts.unlike(id):api.posts.like(id));
+    }catch(err){
+      setLiked(p=>({...p,[key]:was}));
+      setShorts(p=>p.map(s=>s.id===id?{...s,likes:s.likes+(was?1:-1)}:s));
+      showToast(err?.message||"Couldn't like — try again");
+    }
   };
 
   if(!short)return null;
@@ -748,12 +768,16 @@ function ShakyShorts({users,shorts,setShorts,liked,setLiked,showToast,setShowUpl
       </div>
 
       {/* Video area */}
-      <div style={{width:"100%",height:"100%",background:`linear-gradient(135deg,${user.color}18,#0e0718)`,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}
+      <div style={{width:"100%",height:"100%",background:short.videoUrl?"#000":`linear-gradient(135deg,${user.color}18,#0e0718)`,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}
         onClick={e=>{const x=e.clientX;const w=e.currentTarget.offsetWidth;if(x<w/3)setActiveIdx(i=>Math.max(0,i-1));else if(x>w*2/3)setActiveIdx(i=>(i+1)%shorts.length);}}>
-        <div style={{textAlign:"center"}}>
-          <div style={{fontSize:90,marginBottom:8,animation:"wiggle 2.5s ease-in-out infinite"}}>{short.emoji}</div>
-          <div style={{fontSize:14,color:"rgba(255,255,255,0.6)"}}>Tap left/right to skip</div>
-        </div>
+        {short.videoUrl?(
+          <video key={short.id} src={short.videoUrl} autoPlay loop muted playsInline style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+        ):(
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:90,marginBottom:8,animation:"wiggle 2.5s ease-in-out infinite"}}>{short.emoji||"💃"}</div>
+            <div style={{fontSize:14,color:"rgba(255,255,255,0.6)"}}>Tap left/right to skip</div>
+          </div>
+        )}
         <VideoWatermark/>
 
         {/* Top bar */}
@@ -837,16 +861,47 @@ function ShakyShorts({users,shorts,setShorts,liked,setLiked,showToast,setShowUpl
 }
 
 // ── HOME TAB ──
-function HomeTab({liked,setLiked,posts,setPosts,users,following,setFollowing,setActiveTab,showToast,setProfileUser,setShowLive,setShowUpload,notifs,setShowNotifs,openProfile}) {
+function HomeTab({liked,setLiked,posts,setPosts,shorts,users,following,setFollowing,setActiveTab,showToast,setProfileUser,setShowLive,setShowUpload,notifs,setShowNotifs,openProfile}) {
   const [commenting,setCommenting]=useState(null);
   const [cText,setCText]=useState("");
   const unread=notifs.filter(n=>!n.read).length;
-  const toggleLike=id=>{const was=liked[id];setLiked(p=>({...p,[id]:!was}));setPosts(p=>p.map(po=>po.id===id?{...po,likes:po.likes+(was?-1:1)}:po));};
-  const postComment=pid=>{
+  const toggleLike=async id=>{
+    const was=liked[id];
+    setLiked(p=>({...p,[id]:!was})); // optimistic
+    setPosts(p=>p.map(po=>po.id===id?{...po,likes:po.likes+(was?-1:1)}:po));
+    try{
+      await(was?api.posts.unlike(id):api.posts.like(id));
+    }catch(err){
+      // revert on failure — better than silently leaving the UI wrong
+      setLiked(p=>({...p,[id]:was}));
+      setPosts(p=>p.map(po=>po.id===id?{...po,likes:po.likes+(was?1:-1)}:po));
+      showToast(err?.message||"Couldn't like — try again");
+    }
+  };
+  const expandComments=async pid=>{
+    const opening=commenting!==pid;
+    setCommenting(opening?pid:null);
+    if(!opening)return;
+    try{
+      const{comments}=await api.posts.comments(pid);
+      setPosts(p=>p.map(po=>po.id===pid?{...po,comments:comments.map(c=>c.text)}:po));
+    }catch(err){
+      showToast(err?.message||"Couldn't load comments");
+    }
+  };
+  const postComment=async pid=>{
     if(!cText.trim())return;
     const flag=scanContactInfo(cText);
     if(flag.flagged){showToast(`🚫 Comment can't include ${flag.reason}. Repeated attempts get you permanently banned — use paid Contact requests instead`);return;}
-    setPosts(p=>p.map(po=>po.id===pid?{...po,comments:[...po.comments,cText.trim()]}:po));setCText("");setCommenting(null);showToast("Comment posted! 💬");
+    const text=cText.trim();
+    setCText("");
+    try{
+      await api.posts.comment(pid,text);
+      setPosts(p=>p.map(po=>po.id===pid?{...po,comments:[...po.comments,text],commentsCount:(po.commentsCount??po.comments.length)+1}:po));
+      showToast("Comment posted! 💬");
+    }catch(err){
+      showToast(err?.message||"Couldn't post comment — try again");
+    }
   };
   return (
     <div>
@@ -874,12 +929,12 @@ function HomeTab({liked,setLiked,posts,setPosts,users,following,setFollowing,set
             <div style={{width:60,height:80,borderRadius:14,background:"linear-gradient(135deg,#FF3CAC,#A855F7)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,border:`2px solid ${C.bg}`}}>➕</div>
             <div style={{fontSize:10,color:C.sub}}>Add Short</div>
           </div>
-          {INIT_SHORTS.map(s=>{
+          {shorts.slice(0,10).map(s=>{
             const u=users.find(x=>x.id===s.userId)||INIT_USERS[0];
             return (
               <div key={s.id} onClick={()=>setActiveTab(2)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,flexShrink:0,cursor:"pointer"}}>
                 <div style={{width:60,height:80,borderRadius:14,background:`linear-gradient(135deg,${u.color}20,${u.color}08)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,position:"relative",border:`2px solid ${u.color}55`,overflow:"hidden"}}>
-                  {s.emoji}
+                  {s.videoUrl?<video src={s.videoUrl} muted playsInline style={{width:"100%",height:"100%",objectFit:"cover"}}/>:(s.emoji||"💃")}
                   <div style={{position:"absolute",bottom:4,left:0,right:0,height:3,background:"rgba(255,255,255,0.15)",margin:"0 4px",borderRadius:2}}>
                     <div style={{width:"60%",height:"100%",background:u.color,borderRadius:2}}/>
                   </div>
@@ -938,16 +993,16 @@ function HomeTab({liked,setLiked,posts,setPosts,users,following,setFollowing,set
                   </div>
                   <button onClick={()=>{const f=!isF;setFollowing(p=>f?[...p,user.id]:p.filter(x=>x!==user.id));showToast(f?`Following ${user.name}! 👯`:"Unfollowed");}} style={{background:isF?C.purpleL:"linear-gradient(135deg,#FF3CAC,#A855F7)",border:isF?`1px solid ${C.purple}`:"none",borderRadius:10,padding:"6px 12px",color:isF?C.purple:"#fff",fontWeight:700,fontSize:12,cursor:"pointer",flexShrink:0}}>{isF?"✓ Following":"+ Follow"}</button>
                 </div>
-                <div style={{borderRadius:14,background:`linear-gradient(135deg,${user.color}18,${user.color}06)`,height:155,display:"flex",alignItems:"center",justifyContent:"center",fontSize:60,marginBottom:12,border:`1px solid ${user.color}20`,position:"relative"}}>
-                  {MOVES.find(m=>m.name===post.move)?.emoji||"💃"}
-                  <div style={{position:"absolute",bottom:8,left:10}}><Bdg text={post.move} color={user.color}/></div>
-                  <div style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,0.5)",borderRadius:8,padding:"3px 8px",fontSize:10,color:"#fff"}}>🎬 Video</div>
+                <div style={{borderRadius:14,overflow:"hidden",background:`linear-gradient(135deg,${user.color}18,${user.color}06)`,height:155,display:"flex",alignItems:"center",justifyContent:"center",fontSize:60,marginBottom:12,border:`1px solid ${user.color}20`,position:"relative"}}>
+                  {post.videoUrl?<video src={post.videoUrl} controls playsInline style={{width:"100%",height:"100%",objectFit:"cover"}}/>:(MOVES.find(m=>m.name===post.move)?.emoji||"💃")}
+                  {post.move&&<div style={{position:"absolute",bottom:8,left:10,pointerEvents:"none"}}><Bdg text={post.move} color={user.color}/></div>}
+                  {!post.videoUrl&&<div style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,0.5)",borderRadius:8,padding:"3px 8px",fontSize:10,color:"#fff"}}>🎬 Video</div>}
                   <VideoWatermark/>
                 </div>
                 <div style={{fontSize:13,color:C.text,marginBottom:10}}>{post.caption}</div>
                 <div style={{display:"flex",gap:14,alignItems:"center"}}>
                   <button onClick={()=>toggleLike(post.id)} style={{background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:4,fontSize:13,color:liked[post.id]?C.pink:C.sub}}>{liked[post.id]?"❤️":"🤍"} {post.likes}</button>
-                  <button onClick={()=>setCommenting(commenting===post.id?null:post.id)} style={{background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:4,fontSize:13,color:commenting===post.id?C.purple:C.sub}}>💬 {post.comments.length}</button>
+                  <button onClick={()=>expandComments(post.id)} style={{background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:4,fontSize:13,color:commenting===post.id?C.purple:C.sub}}>💬 {post.commentsCount??post.comments.length}</button>
                   {user.allowDownload
                     ?<button onClick={()=>showToast("Video saved with Shakybum watermark 🍑⬇️")} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:C.sub,marginLeft:"auto"}}>⬇️ Save</button>
                     :<button onClick={()=>showToast("⬇️ Downloads disabled by creator")} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:C.sub,opacity:.5,marginLeft:"auto"}}>🚫 Save</button>
@@ -2664,14 +2719,17 @@ function MainApp() {
 
   const loadCoreData=async(usersOverride)=>{
     try{
-      const [usersRes,crSent,crReceived,bsSent,bsReceived,bsActive,notifsRes]=await Promise.all([
+      const [usersRes,crSent,crReceived,bsSent,bsReceived,bsActive,notifsRes,postsRes,shortsRes]=await Promise.all([
         usersOverride?Promise.resolve({users:usersOverride}):api.users.list(),
         api.contactRequests.sent(),api.contactRequests.received(),
         api.bumSessions.sent(),api.bumSessions.received(),api.bumSessions.active(),
         api.notifications.list(),
+        api.posts.feed("post"),api.posts.feed("short"),
       ]);
       const mappedUsers=usersOverride||usersRes.users.map(mapUser);
       setUsers(mappedUsers);
+      setPosts(postsRes.posts.map(mapPost));
+      setShorts(shortsRes.posts.map(mapPost));
 
       const approved=crSent.requests.filter(r=>r.status==="approved").map(r=>r.creatorId);
       setApprovedContacts(approved);
@@ -2911,11 +2969,21 @@ function MainApp() {
             showToast(err?.message||"Video shows now, but couldn't save — try again or it may not survive a reload");
           }
         }else if(showUpload==="short"){
-          setShorts(p=>[{id:Date.now(),userId:ME.id,videoUrl:videoURL,caption,timeAgo:"now"},...p]);
-          showToast("ShakyShort posted! ⚡");
+          try{
+            const{post}=await api.posts.create({videoUrl:videoURL,caption,kind:"short"});
+            setShorts(p=>[mapPost(post),...p]);
+            showToast("ShakyShort posted! ⚡");
+          }catch(err){
+            showToast(err?.message||"Couldn't post — try again");
+          }
         }else{
-          setPosts(p=>[{id:Date.now(),userId:ME.id,move:moveTag,caption,videoUrl:videoURL,likes:0,comments:[],timeAgo:"now"},...p]);
-          showToast("Video posted! 🔥");
+          try{
+            const{post}=await api.posts.create({videoUrl:videoURL,caption,moveTag,kind:"post"});
+            setPosts(p=>[mapPost(post),...p]);
+            showToast("Video posted! 🔥");
+          }catch(err){
+            showToast(err?.message||"Couldn't post — try again");
+          }
         }
       }} showToast={showToast}/>}
       {showLive&&<LiveModal onClose={()=>setShowLive(false)} showToast={showToast}/>}

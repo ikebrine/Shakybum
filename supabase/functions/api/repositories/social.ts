@@ -10,6 +10,10 @@ function toPost(row: any) {
     id: row.id, userId: row.user_id, videoUrl: row.video_url, caption: row.caption,
     moveTag: row.move_tag, kind: row.kind, likesCount: row.likes_count,
     commentsCount: row.comments_count, createdAt: row.created_at,
+    // Only present when the query joined against likes for a specific
+    // viewer (see feed/byUser's viewerId param) — undefined otherwise,
+    // not false, so callers can tell "unknown" from "confirmed not liked".
+    likedByMe: row.liked_by_me === undefined ? undefined : !!row.liked_by_me,
   };
 }
 export const postsRepo = {
@@ -25,13 +29,51 @@ export const postsRepo = {
     const { rows } = await db.query(`SELECT * FROM posts WHERE id = $1`, [id]);
     return toPost(rows[0]);
   },
-  async feed({ kind = "post", limit = 30, before }: { kind?: string; limit?: number; before?: string } = {}) {
+  async feed({ kind = "post", limit = 30, before, viewerId }: { kind?: string; limit?: number; before?: string; viewerId?: string } = {}) {
+    // viewerId present -> LEFT JOIN likes scoped to that user, so each row
+    // carries whether THIS viewer liked it, without an N+1 query per post.
+    if (viewerId && before) {
+      const { rows } = await db.query(
+        `SELECT p.*, (l.id IS NOT NULL) as liked_by_me FROM posts p
+         LEFT JOIN likes l ON l.post_id = p.id AND l.user_id = $4
+         WHERE p.kind = $1 AND p.created_at < $2 ORDER BY p.created_at DESC LIMIT $3`,
+        [kind, before, limit, viewerId]
+      );
+      return rows.map(toPost);
+    }
+    if (viewerId) {
+      const { rows } = await db.query(
+        `SELECT p.*, (l.id IS NOT NULL) as liked_by_me FROM posts p
+         LEFT JOIN likes l ON l.post_id = p.id AND l.user_id = $3
+         WHERE p.kind = $1 ORDER BY p.created_at DESC LIMIT $2`,
+        [kind, limit, viewerId]
+      );
+      return rows.map(toPost);
+    }
     const { rows } = before
       ? await db.query(`SELECT * FROM posts WHERE kind = $1 AND created_at < $2 ORDER BY created_at DESC LIMIT $3`, [kind, before, limit])
       : await db.query(`SELECT * FROM posts WHERE kind = $1 ORDER BY created_at DESC LIMIT $2`, [kind, limit]);
     return rows.map(toPost);
   },
-  async byUser(userId: string, { kind }: { kind?: string } = {}) {
+  async byUser(userId: string, { kind, viewerId }: { kind?: string; viewerId?: string } = {}) {
+    if (viewerId && kind) {
+      const { rows } = await db.query(
+        `SELECT p.*, (l.id IS NOT NULL) as liked_by_me FROM posts p
+         LEFT JOIN likes l ON l.post_id = p.id AND l.user_id = $3
+         WHERE p.user_id = $1 AND p.kind = $2 ORDER BY p.created_at DESC`,
+        [userId, kind, viewerId]
+      );
+      return rows.map(toPost);
+    }
+    if (viewerId) {
+      const { rows } = await db.query(
+        `SELECT p.*, (l.id IS NOT NULL) as liked_by_me FROM posts p
+         LEFT JOIN likes l ON l.post_id = p.id AND l.user_id = $2
+         WHERE p.user_id = $1 ORDER BY p.created_at DESC`,
+        [userId, viewerId]
+      );
+      return rows.map(toPost);
+    }
     const { rows } = kind
       ? await db.query(`SELECT * FROM posts WHERE user_id = $1 AND kind = $2 ORDER BY created_at DESC`, [userId, kind])
       : await db.query(`SELECT * FROM posts WHERE user_id = $1 ORDER BY created_at DESC`, [userId]);

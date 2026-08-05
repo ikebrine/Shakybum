@@ -34,6 +34,37 @@ Deno.test("posts: create, feed, like, comment", async () => {
   assert.equal(comment.status, 201);
 });
 
+Deno.test("posts: likedByMe reflects each viewer's own like state, not a global flag", async () => {
+  const alice = await newUser("alice_lbm");
+  const bob = await newUser("bob_lbm");
+  const carol = await newUser("carol_lbm");
+
+  const create = await env.api("POST", "/posts", { token: alice.token, body: { caption: "test post" } });
+  const postId = create.body.post.id;
+
+  // Nobody's liked it yet — feed should show likedByMe: false for both viewers
+  const feedBefore = await env.api("GET", "/posts?kind=post", { token: bob.token });
+  const postBefore = feedBefore.body.posts.find((p: any) => p.id === postId);
+  assert.equal(postBefore.likedByMe, false);
+
+  // Bob likes it
+  const likeRes = await env.api("POST", `/posts/${postId}/like`, { token: bob.token });
+  assert.equal(likeRes.body.likedByMe, true);
+
+  // Bob's feed view now shows liked=true for this post...
+  const bobFeed = await env.api("GET", "/posts?kind=post", { token: bob.token });
+  assert.equal(bobFeed.body.posts.find((p: any) => p.id === postId).likedByMe, true);
+
+  // ...but Carol's feed view (different viewer, never liked it) still shows false —
+  // this is the actual thing worth testing: likedByMe is per-viewer, not a shared flag
+  const carolFeed = await env.api("GET", "/posts?kind=post", { token: carol.token });
+  assert.equal(carolFeed.body.posts.find((p: any) => p.id === postId).likedByMe, false);
+
+  // Same check via byUser
+  const byUser = await env.api("GET", `/posts/user/${alice.user.id}`, { token: bob.token });
+  assert.equal(byUser.body.posts.find((p: any) => p.id === postId).likedByMe, true);
+});
+
 Deno.test("posts: caption and comments are blocked when they leak contact info", async () => {
   const alice = await newUser("alice2");
   const bob = await newUser("bob2");

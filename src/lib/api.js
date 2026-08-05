@@ -145,6 +145,19 @@ export const api = {
       return json; // { url }
     },
   },
+  posts: {
+    create: (body) => request("POST", "/posts", { body }), // { videoUrl, caption, moveTag, kind: "post"|"short" }
+    feed: (kind = "post", { limit, before } = {}) => {
+      const params = new URLSearchParams({ kind, ...(limit ? { limit } : {}), ...(before ? { before } : {}) });
+      return request("GET", `/posts?${params}`);
+    },
+    byUser: (userId, kind) => request("GET", `/posts/user/${userId}${kind ? `?kind=${kind}` : ""}`),
+    get: (id) => request("GET", `/posts/${id}`),
+    like: (id) => request("POST", `/posts/${id}/like`),
+    unlike: (id) => request("DELETE", `/posts/${id}/like`),
+    comments: (id) => request("GET", `/posts/${id}/comments`),
+    comment: (id, text) => request("POST", `/posts/${id}/comments`, { body: { text } }),
+  },
 };
 
 /**
