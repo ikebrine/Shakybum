@@ -153,6 +153,7 @@ export const api = {
     },
     byUser: (userId, kind) => request("GET", `/posts/user/${userId}${kind ? `?kind=${kind}` : ""}`),
     get: (id) => request("GET", `/posts/${id}`),
+    delete: (id) => request("DELETE", `/posts/${id}`),
     like: (id) => request("POST", `/posts/${id}/like`),
     unlike: (id) => request("DELETE", `/posts/${id}/like`),
     comments: (id) => request("GET", `/posts/${id}/comments`),

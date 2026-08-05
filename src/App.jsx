@@ -424,11 +424,38 @@ function HelpScreen({onClose,showToast}) {
 
 // My Videos Screen
 function MyVideosScreen({onClose,showToast}) {
-  const myVids=[
-    {id:1,title:"Waist Wine Flow",move:"Waist Wine",emoji:"🌀",likes:342,views:1200,date:"Today"},
-    {id:2,title:"Morning Routine",move:"Belly Roll",emoji:"✨",likes:128,views:540,date:"Yesterday"},
-    {id:3,title:"Challenge Entry",move:"Shakira Twist",emoji:"🔥",likes:89,views:320,date:"3 days ago"},
-  ];
+  const[vids,setVids]=useState(null); // null = loading
+  const[deletingId,setDeletingId]=useState(null);
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const{posts}=await api.posts.byUser(ME.id);
+        setVids(posts.map(p=>({
+          id:p.id,videoUrl:p.videoUrl,caption:p.caption||(p.moveTag?`${p.moveTag} move`:"Untitled"),
+          move:p.moveTag,kind:p.kind,likes:p.likesCount??0,comments:p.commentsCount??0,
+          date:timeAgo(p.createdAt)+" ago",
+        })));
+      }catch(err){
+        showToast(err?.message||"Couldn't load your videos");
+        setVids([]);
+      }
+    })();
+  },[]);
+
+  const del=async id=>{
+    setDeletingId(id);
+    try{
+      await api.posts.delete(id);
+      setVids(p=>p.filter(v=>v.id!==id));
+      showToast("Video deleted");
+    }catch(err){
+      showToast(err?.message||"Couldn't delete — try again");
+    }finally{
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div style={{position:"fixed",inset:0,background:`radial-gradient(ellipse at top,#2e0a40,${C.bg})`,zIndex:700,display:"flex",flexDirection:"column",maxWidth:390,margin:"0 auto"}}>
       <div style={{padding:"52px 20px 16px",display:"flex",alignItems:"center",gap:12}}>
@@ -436,23 +463,23 @@ function MyVideosScreen({onClose,showToast}) {
         <div style={{fontFamily:"'Pacifico',cursive",fontSize:20,color:C.text}}>My Videos 🎬</div>
       </div>
       <div style={{flex:1,overflowY:"auto",padding:"0 20px"}}>
-        {myVids.map(v=>(
+        {vids===null&&<div style={{textAlign:"center",padding:"60px 20px",color:C.sub}}>Loading…</div>}
+        {vids!==null&&vids.length===0&&<div style={{textAlign:"center",padding:"60px 20px",color:C.sub}}><div style={{fontSize:44,marginBottom:10}}>🎬</div>No videos yet — post one from Home!</div>}
+        {vids?.map(v=>(
           <div key={v.id} style={{background:C.bgCard,borderRadius:16,padding:"14px",border:`1px solid ${C.border}`,marginBottom:10,display:"flex",gap:14,alignItems:"center"}}>
-            <div style={{width:56,height:56,borderRadius:12,background:`linear-gradient(135deg,${C.pink}20,${C.purple}10)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,position:"relative",flexShrink:0}}>
-              {v.emoji}<VideoWatermark/>
+            <div style={{width:56,height:56,borderRadius:12,background:`linear-gradient(135deg,${C.pink}20,${C.purple}10)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,position:"relative",flexShrink:0,overflow:"hidden"}}>
+              {v.videoUrl?<video src={v.videoUrl} muted playsInline style={{width:"100%",height:"100%",objectFit:"cover"}}/>:"💃"}
+              <VideoWatermark/>
             </div>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:2}}>{v.title}</div>
-              <div style={{fontSize:11,color:C.sub}}>{v.move} · {v.date}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{v.caption}</div>
+              <div style={{fontSize:11,color:C.sub}}>{v.kind==="short"?"⚡ Short":"🎬 Post"} · {v.date}</div>
               <div style={{display:"flex",gap:12,marginTop:4}}>
                 <span style={{fontSize:11,color:C.sub}}>❤️ {v.likes}</span>
-                <span style={{fontSize:11,color:C.sub}}>👁 {v.views.toLocaleString()}</span>
+                <span style={{fontSize:11,color:C.sub}}>💬 {v.comments}</span>
               </div>
             </div>
-            <div style={{display:"flex",flexDirection:"column",gap:6}}>
-              <button onClick={()=>showToast("Video options coming soon")} style={{background:C.purpleL,border:`1px solid ${C.purple}44`,borderRadius:8,padding:"5px 10px",color:C.purple,fontWeight:700,fontSize:10,cursor:"pointer"}}>⋯</button>
-              <button onClick={()=>showToast("Video deleted")} style={{background:C.redL,border:"1px solid rgba(255,59,92,0.3)",borderRadius:8,padding:"5px 10px",color:"#FF3B5C",fontWeight:700,fontSize:10,cursor:"pointer"}}>🗑</button>
-            </div>
+            <button onClick={()=>del(v.id)} disabled={deletingId===v.id} style={{background:C.redL,border:"1px solid rgba(255,59,92,0.3)",borderRadius:8,padding:"7px 10px",color:"#FF3B5C",fontWeight:700,fontSize:10,cursor:deletingId===v.id?"default":"pointer",opacity:deletingId===v.id?0.5:1,flexShrink:0}}>{deletingId===v.id?"…":"🗑"}</button>
           </div>
         ))}
         <div style={{height:30}}/>
