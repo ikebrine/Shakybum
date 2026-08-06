@@ -1872,7 +1872,7 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
   const startCamera=async()=>{
     setStep("cam");setCamError(null);
     try{
-      const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"},audio:true});
+      const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",frameRate:{ideal:30,max:30}},audio:true});
       streamRef.current=s;
       if(camVideoRef.current)camVideoRef.current.srcObject=s;
     }catch(e){
@@ -1891,7 +1891,18 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
     chunksRef.current=[];
     let recorder;
     try{
-      recorder=new MediaRecorder(streamRef.current,{mimeType:MediaRecorder.isTypeSupported("video/webm")?"video/webm":undefined});
+      // Explicit bitrate encourages more consistent, predictable encoding —
+      // combined with the timeslice below (recorder.start(1000) instead of
+      // recorder.start()), this avoids a known WebM duration/timestamp bug
+      // where letting the browser buffer everything into one chunk at
+      // stop() can cause the container to report an incorrect duration,
+      // making playback stretch out into apparent slow motion even though
+      // the captured content is normal speed. Most common on Android
+      // WebView (i.e. exactly what this Capacitor app runs inside).
+      recorder=new MediaRecorder(streamRef.current,{
+        mimeType:MediaRecorder.isTypeSupported("video/webm")?"video/webm":undefined,
+        videoBitsPerSecond:2_500_000,
+      });
     }catch(e){
       showToast&&showToast("🚫 Recording isn't supported in this browser.");
       return;
@@ -1903,7 +1914,7 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
       setStep("preview");
     };
     recorderRef.current=recorder;
-    recorder.start();
+    recorder.start(1000); // emit a chunk every second, not just once at stop()
     setRecTime(0);setStep("recording");
     timerRef.current=setInterval(()=>{setRecTime(p=>{if(p+1>=maxSec){stopRec();return p+1;}return p+1;});},1000);
   };
