@@ -7,6 +7,19 @@
 // Project Settings → Environment Variables.
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
 
+// Derives the Android APK's public download URL from the same base URL
+// already configured for the API — avoids a second env var for something
+// that's really just another path on the same Supabase project. Only
+// resolves correctly when API_BASE points at a Supabase Edge Function
+// (".../functions/v1/api"); returns null otherwise (e.g. local dev
+// against the Node backend) so the download button can hide itself
+// rather than link somewhere broken.
+export function getApkDownloadUrl() {
+  const match = API_BASE.match(/^(https:\/\/[^/]+\.supabase\.co)\/functions\/v1\/api\/?$/);
+  if (!match) return null;
+  return `${match[1]}/storage/v1/object/public/releases/shakybum.apk`;
+}
+
 const TOKEN_KEY = "shakybum_token";
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
 export const setToken = (token) => localStorage.setItem(TOKEN_KEY, token);

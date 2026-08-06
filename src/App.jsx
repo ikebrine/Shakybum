@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { api, getToken, setToken, clearToken, mapUser, badgeToFrontend, pollUntil, ApiError } from "./lib/api.js";
+import { api, getToken, setToken, clearToken, mapUser, badgeToFrontend, pollUntil, ApiError, getApkDownloadUrl } from "./lib/api.js";
 
 const GS = () => (
   <>
@@ -2317,6 +2317,7 @@ function OTPInput({value,onChange}) {
 
 // ── WELCOME SCREEN ──
 function WelcomeScreen({onLogin,onSignup,onGuest}) {
+  const apkUrl=getApkDownloadUrl();
   return (
     <div style={{minHeight:"100vh",background:`radial-gradient(ellipse at top,#2e0a40 0%,${C.bg} 60%)`,display:"flex",flexDirection:"column",alignItems:"center",position:"relative",overflow:"hidden"}}>
       <Bubbles/>
@@ -2346,6 +2347,11 @@ function WelcomeScreen({onLogin,onSignup,onGuest}) {
         <div style={{fontSize:11,color:C.sub,textAlign:"center",lineHeight:1.6,marginTop:4}}>
           By continuing you agree to our <span style={{color:C.pink,cursor:"pointer"}}>Terms of Service</span> and <span style={{color:C.pink,cursor:"pointer"}}>Privacy Policy</span>
         </div>
+        {apkUrl&&(
+          <a href={apkUrl} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginTop:10,fontSize:12,color:C.sub,textDecoration:"none"}}>
+            <span>📱</span> Download Android APK
+          </a>
+        )}
       </div>
     </div>
   );
