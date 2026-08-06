@@ -2021,8 +2021,8 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
         </div>
       )}
       {step==="preview"&&(
-        <div style={{flex:1,display:"flex",flexDirection:"column",padding:"0 20px"}}>
-          <div style={{flex:1,borderRadius:20,overflow:"hidden",background:"#000",marginBottom:14,position:"relative",minHeight:240,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div style={{flex:1,display:"flex",flexDirection:"column",padding:"0 20px",overflowY:"auto",minHeight:0}}>
+          <div style={{flexShrink:0,maxHeight:"38vh",aspectRatio:"9/13",borderRadius:20,overflow:"hidden",background:"#000",marginBottom:14,position:"relative",minHeight:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
             {videoURL?(
               <video src={videoURL} controls playsInline loop style={{width:"100%",height:"100%",objectFit:"cover"}}/>
             ):(
@@ -2045,7 +2045,8 @@ function VideoUploadModal({mode="post",onClose,onDone,showToast}) {
             <input value={caption} onChange={e=>setCaption(e.target.value)} placeholder="Add a caption... ⚡" style={{width:"100%",background:C.bgCard,border:`1px solid ${scanContactInfo(caption).flagged?"rgba(255,59,92,0.6)":C.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,color:C.text,outline:"none",marginBottom:scanContactInfo(caption).flagged?4:14}}/>
             {scanContactInfo(caption).flagged&&<div style={{fontSize:11,color:"#FF3B5C",fontWeight:600,marginBottom:10}}>⚠ Can't include {scanContactInfo(caption).reason}</div>}
           </>}
-          <button onClick={doUpload} style={{width:"100%",background:"linear-gradient(135deg,#FF3CAC,#A855F7)",border:"none",borderRadius:14,padding:"13px",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}}>{mode==="profile"?"✓ Set as Profile Video":mode==="short"?"⚡ Post ShakyShort":"🚀 Post Video"}</button>
+          <button onClick={doUpload} style={{position:"sticky",bottom:12,width:"100%",background:"linear-gradient(135deg,#FF3CAC,#A855F7)",border:"none",borderRadius:14,padding:"13px",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",flexShrink:0,boxShadow:"0 4px 20px rgba(0,0,0,0.4)"}}>{mode==="profile"?"✓ Set as Profile Video":mode==="short"?"⚡ Post ShakyShort":"🚀 Post Video"}</button>
+          <div style={{height:8,flexShrink:0}}/>
         </div>
       )}
       {step==="uploading"&&(
